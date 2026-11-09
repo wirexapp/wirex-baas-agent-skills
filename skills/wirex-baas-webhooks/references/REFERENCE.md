@@ -2,7 +2,7 @@
 
 Complete webhook payload reference for all Wirex BaaS webhook endpoints. This is the canonical location for webhook payloads — other skills cross-reference this file.
 
-For delivery semantics (POST, 10s timeout, no retry) and the activity history feed API, see [SKILL.md](../SKILL.md). All paths are appended to your webhook base URL: `POST {your_webhook_base_url}/v2/webhooks/...`.
+For delivery semantics (POST, 10s timeout, up to 5 retries with exponential backoff) and the activity history feed API, see [SKILL.md](../SKILL.md). All paths are appended to your webhook base URL: `POST {your_webhook_base_url}/v2/webhooks/...`.
 
 ---
 
@@ -406,7 +406,7 @@ Each type includes a type-specific sub-object (e.g., `sepa.iban`, `sepa.bic`; `c
 
 ### User Webhook -- `/v2/webhooks/user`
 
-Fires when user profile, verification status or capability status changes. The payload is the same object as the `GET /api/v2/user` response (`profile`, `residence_address`, `verification`, `external_providers`, `capabilities` sub-objects).
+Fires when user profile or verification status changes. The payload is the `GET /api/v2/user` object **without `capabilities`** (`profile`, `residence_address`, `verification`, `external_providers` sub-objects). After a verification change, call `GET /api/v2/user` to read capabilities.
 
 **Payload:**
 
@@ -417,11 +417,16 @@ Fires when user profile, verification status or capability status changes. The p
   "owner": "0xA7E41d5680dE394EaA2ed417169DFf56840Fb3EE",
   "user_address": "0xA7E41d5680dE394EaA2ed417169DFf56840Fb3EE",
   "chain_id": 8453,
-  "profile": { "first_name": "Alex", "last_name": "Grey", "status": "Active" },
+  "last_login_ip": "203.0.113.7",
+  "profile": {
+    "first_name": "Alex",
+    "last_name": "Grey",
+    "email": "alex.grey@wirexapp.com",
+    "status": "Active",
+    "registration_date": "2024-01-01T10:00:00Z"
+  },
   "residence_address": { "line1": "10 Downing Street", "city": "London", "post_code": "SW1A 2AA", "country": "GB" },
-  "verification": { "status": "Approved", "levels": [], "documents": [] },
-  "external_providers": [],
-  "capabilities": []
+  "verification": { "status": "Approved", "levels": [{ "status": "Approved", "type": "SDD", "name": "SDD" }] }
 }
 ```
 
@@ -432,7 +437,10 @@ Fires when user profile, verification status or capability status changes. The p
 | `chain_id` | integer | Chain the account was registered on |
 | `id` | string (UUID) | **Deprecated.** Mirrors `user_id` |
 | `owner` | string | **Deprecated.** Mirrors `user_address` |
-| `profile`, `residence_address`, `verification`, `external_providers`, `capabilities` | object / array | As in `GET /api/v2/user` |
+| `last_login_ip` | string | IP of the last non-S2S login. Omitted until one is recorded |
+| `tags` | array of string | Platform tags on the account. Omitted when none |
+| `profile` | object | Personal details, profile status, `registration_date` |
+| `residence_address`, `verification`, `external_providers` | object / array | As in `GET /api/v2/user` |
 
 This is the v2 replacement for the legacy `/webhook/users`. Both are delivered; treat the legacy one as superseded for new integrations.
 

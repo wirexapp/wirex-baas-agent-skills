@@ -1,6 +1,6 @@
 ---
 name: wirex-baas-webhooks
-description: "Wirex BaaS webhooks and activity history — receive real-time event notifications and query transaction history. Covers all v2 webhook endpoints (wallets, balances, cards, card-limits, 3ds, activities, recipients, erc-withdrawals, user, debt-cases, corporations), v1 legacy webhooks (users, accounts/fiat), delivery specs (POST JSON, 10s timeout, no automatic retry), and the activity history feed (GET /api/v2/activity/feed, plus v1/v3, single, search, with pagination and filters)."
+description: "Wirex BaaS webhooks and activity history — receive real-time event notifications and query transaction history. Covers all v2 webhook endpoints (wallets, balances, cards, card-limits, 3ds, activities, recipients, erc-withdrawals, user, debt-cases, corporations), v1 legacy webhooks (users, accounts/fiat), delivery specs (POST JSON, 10s timeout, up to 5 retries with exponential backoff), and the activity history feed (GET /api/v2/activity/feed, plus v1/v3, single, search, with pagination and filters)."
 license: Apache-2.0
 compatibility: "Requires network access. Compatible with Claude Code, Codex, and all Agent Skills spec tools."
 metadata:
@@ -19,7 +19,7 @@ Wirex BaaS uses webhooks to notify partners of state changes in real time. This 
 | **Method** | HTTP POST |
 | **Content-Type** | `application/json` |
 | **Timeout** | 10 seconds |
-| **Retries** | None -- failed deliveries are logged but **not automatically retried** |
+| **Retries** | A failed delivery is retried up to 5 times with exponential backoff, then dropped. Retries can arrive out of order and more than once |
 | **Authentication** | None -- no auth headers are added to webhook requests |
 
 Webhooks are delivered to your **webhook base URL** (HTTPS), which Wirex configures for your company during onboarding; the paths below are appended to it (`POST {your_webhook_base_url}/v2/webhooks/wallets`).
@@ -32,7 +32,7 @@ Your webhook receiver must:
 2. Implement **idempotent handlers** -- duplicate events must be processed safely.
 3. Offload heavy processing to an **async queue** -- do not block the response while processing business logic.
 
-If the receiver does not respond with 2xx within the timeout window, the delivery is recorded as failed and will not be retried automatically (contact Wirex support if you need event replay). Monitor your webhook logs and implement a polling fallback using the activity history feed for critical flows.
+If the receiver does not respond with 2xx within the timeout window, the delivery is retried up to 5 times with exponential backoff, then dropped; retries can arrive out of order and more than once, so treat each payload as the latest state of the entity. Monitor your webhook logs and implement a polling fallback using the activity history feed for critical flows.
 
 ---
 
@@ -48,7 +48,7 @@ If the receiver does not respond with 2xx within the timeout window, the deliver
 | `/v2/webhooks/activities` | Transaction and activity feed updates |
 | `/v2/webhooks/recipients` | Recipient creation and update notifications |
 | `/v2/webhooks/erc-withdrawals` | Pending ERC20 withdrawal requests with validity windows |
-| `/v2/webhooks/user` | User profile, verification and capability changes (v2 replacement for `/webhook/users`) |
+| `/v2/webhooks/user` | User profile and verification changes (v2 replacement for `/webhook/users`) |
 | `/v2/webhooks/debt-cases` | Operations that left a user account in debt |
 | `/v2/webhooks/corporations` | Corporate profile and verification changes (only for corporate integrations) |
 
@@ -98,7 +98,9 @@ The API reference enum additionally lists `Pix`, `FpsHk`, `Imps`, `Instapay`, `B
 |--------|---------|
 | `Pending` | Transaction in progress |
 | `Completed` | Transaction successfully finished |
-| `Failed` | Transaction failed (see `status_reason`) |
+| `Failed` | Transaction failed or was cancelled (see `status_reason`) |
+
+There is no `Cancelled` status: a cancelled movement reads `Failed`. A card purchase refunded or reversed in full reads `Failed`; a partial refund leaves it `Completed`. A card purchase stays `Pending` until its debit settles.
 
 ### Activity Direction Values
 
@@ -139,7 +141,7 @@ Every amount in the feed carries `amount_precise` (exact base-unit string) and `
 
 ## Implementation Best Practices
 
-> **WARNING:** Failed webhook deliveries are logged but **NOT automatically retried**. Implement polling fallback for critical flows.
+> **WARNING:** A failed delivery is retried up to 5 times with exponential backoff, then **dropped**. Retries can arrive out of order and more than once. Implement polling fallback for critical flows.
 
 **Webhook handling flow:**
 
@@ -191,7 +193,7 @@ The activity history endpoints provide a paginated, filterable feed of user acti
 
 ### Search
 
-`GET /api/v2/activity/search?predicate=...` -- `predicate` is required, 1-128 characters matching `^[A-Za-z0-9 \-_.@:/+]{1,128}$` (quotes, backslashes, backticks, semicolons, brackets, pipes and control characters are refused with `400`); `page_number`, `page_size` (default 25, max 50). Same response shape as the feed; scoped to the authenticated owner.
+`GET /api/v2/activity/search?predicate=...` -- `predicate` is required, 1-128 characters matching `^[A-Za-z0-9 \-_.@:/+]{1,128}$` (quotes, backslashes, backticks, semicolons, brackets, pipes and control characters are refused with `400`); `page_number`, `page_size` (default 25, max 50). Same response shape as the feed; scoped to the authenticated owner. `GET /api/v3/activity/search` accepts up to five `predicate` parameters (`?predicate=amazon&predicate=4821`); an activity must match all of them.
 
 ### Subject Types
 
@@ -262,7 +264,7 @@ The feed response is a `data` array (there is no pagination envelope):
 }
 ```
 
-Fiat amounts carry `currency`; crypto amounts carry `token_symbol` and `token_address`. Optional fields include `fee_amount`, `recipient`, `reward`, `rrn` (card transactions) and `sub_type`.
+Fiat amounts carry `currency`; crypto amounts carry `token_symbol` and `token_address`. Optional fields include `fee_amount` (card fees are reported here, not folded into `rate`), `recipient`, `reward`, `rrn` (card transactions) and `sub_type`.
 
 ### Filter Examples
 

@@ -313,6 +313,7 @@ User tokens include user-scoped claims in addition to the standard JWT fields. T
 | `X-Chain-Id` | Numeric string | `84532` | Target blockchain network ID (required on all API requests per `retail-api-basics`) |
 | `Authorization` | `Bearer <token>` | `Bearer eyJhbGciOi...` | S2S or user access token. Most endpoints |
 | `Content-Type` | MIME type | `application/json` | Requests with a JSON body |
+| `X-Company-Id` | UUID | `00000000-0000-0000-0000-000000000044` | Company id; used by `GET /api/v1/config` without a token |
 
 ### User Identity Headers
 

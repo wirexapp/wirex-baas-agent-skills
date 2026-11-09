@@ -220,10 +220,10 @@ See [references/REFERENCE.md](references/REFERENCE.md) for full webhook payload 
 
 ## FX Swap (stablecoin exchange)
 
-Swaps between stablecoins of different currencies (e.g. USDC to EURC) are executed by Circle, not on-chain by the wallet. Three steps; requires the `StableExchange` capability `Active`, and both tokens listed in `GET /api/v1/config/tokens`:
+Swaps between USDC and EURC, in either direction, are executed by Circle, not on-chain by the wallet. Three steps; requires the `StableExchange` capability `Active`, and both tokens listed in `GET /api/v1/config/tokens`:
 
-1. `POST /api/v1/fx/estimate` with `source_asset_address`, `destination_asset_address` and exactly one of `source_asset_amount` / `destination_asset_amount` (decimal strings). Returns `estimation_id`, `trade_rate`, `destination_address` (`deposit_address` is deprecated), `expiration_time`; amounts are 2-decimal display values.
-2. Send the source tokens on-chain to `destination_address` yourself and wait until mined.
+1. `POST /api/v1/fx/estimate` with `source_asset_address`, `destination_asset_address` and exactly one of `source_asset_amount` / `destination_asset_amount` (decimal strings). Returns `estimation_id`, `trade_rate`, `destination_address` (`deposit_address` is deprecated), `expiration_time`; amounts are 2-decimal display values, with the exact values beside them as `source_asset_amount_precise` / `source_asset_decimals`, `destination_asset_amount_precise` / `destination_asset_decimals` and `trade_rate_precise` / `rate_decimals`.
+2. Send `source_asset_amount_precise` base units of the source token on-chain to `destination_address` yourself and wait until mined.
 3. `POST /api/v1/fx` with `estimation_id` and `payment_transaction_hash` (0x-prefixed, 66 chars). Returns `trade_id`.
 
 The quote expiry includes the on-chain confirmation time.

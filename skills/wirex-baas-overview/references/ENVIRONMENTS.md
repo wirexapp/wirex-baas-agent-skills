@@ -15,7 +15,7 @@ Reference for Wirex BaaS environments, blockchain networks, contract registry ad
 
 ### PCI-Compliant Card API
 
-Card tokenization for push-to-card transfers requires calls to Wirex's PCI-compliant secure environment. These endpoints handle sensitive card data and are subject to additional security requirements. (A browser PCI Compliant SDK also exists; see the docs link in the SKILL.)
+Card data for top-up and push-to-card is submitted to Wirex's PCI-compliant secure environment, never to the BaaS API. The recommended way to reach it is the [PCI Compliant SDK](https://docs.wirexapp.com/docs/retail-pci-sdk), which selects the environment by name; the base URLs below are for calling the card-manager API directly. These endpoints handle sensitive card data and are subject to additional security requirements.
 
 | Environment | Base URL | Description |
 |---|---|---|
@@ -216,10 +216,10 @@ Treat any other `token_type` as one you do not handle. Balances are held in unif
 ## Client Application Configuration
 
 ```
-GET /api/v1/config?company_name={name}
+GET /api/v1/config
 ```
 
-Front-end bootstrap configuration for a company (auth provider settings, chain list, support integration, Bridge card-rail chain/token, Apple Pay / Google Pay parameters). `company_name` is required; an unknown name returns `400`. A server-side integration takes its chain and contract configuration from the credentials above instead.
+Front-end bootstrap configuration for a company (auth provider settings, chain list, support integration, Apple Pay / Google Pay parameters). No token is required. Optional headers: `X-Company-Id` (company id as a UUID, recommended) and `X-Company-Name` (used only when `X-Company-Id` is not sent). With a Wirex token the token's company is answered and the headers are ignored; with neither a token nor a header the platform default company is answered; an unknown id or name returns `400`. Fields of note: `transactionAuthorizationMode` (`External` or `Signature` -- whether payouts need a wallet signature), `sdkAllowedDomains`, `topup`, `p2c_currencies`. A server-side integration takes its chain and contract configuration from the credentials above instead.
 
 ---
 

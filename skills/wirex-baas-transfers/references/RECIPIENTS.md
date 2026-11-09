@@ -42,12 +42,12 @@ Retrieve a paginated list of all recipients.
 | Parameter   | Type    | Required | Default | Description              |
 |------------|---------|----------|---------|--------------------------|
 | page_number | integer | No       | 0       | Page number; the guides disagree (0-indexed default vs 1-indexed). `0` and `1` both return the first page (observed live, see BANKING.md) |
-| page_size   | integer | No       | 25      | Items per page           |
+| page_size   | integer | No       | 25      | Items per page (maximum 50) |
 | sort        | string  | No       | name    | `name` (ascending) or `usage` (descending usage count) |
 
 **Response (200 OK):**
 
-> The list is under `data`, as in the API reference schema (`RecipientsResponse`); live sandbox returned `data` for `GET /api/v1/recipients` (2026-10-25). The guides show `items` + `total_count` / `page_number` / `page_size` instead.
+> The list is under `data`, as in the API reference schema (`RecipientsResponse`); live sandbox returned `data` for `GET /api/v1/recipients` (2026-10-25). The guides now also show `data`, with no `items` / `total_count` / `page_number` / `page_size`: the list carries no total count, page until a page returns fewer than `page_size` items.
 
 ```json
 {
@@ -86,7 +86,7 @@ Retrieve a paginated list of all recipients.
           "type": "Card",
           "currencies": ["USD"],
           "card": {
-            "card_id": "tok_abc123",
+            "card_id": "b7e2c1a4-3f5d-4e6a-9c8b-1d2e3f4a5b6c",
             "card_pan_last": "4242"
           }
         }
@@ -176,7 +176,7 @@ GET /api/v1/recipients/filter/type?type=Card
           "type": "Card",
           "currencies": ["USD"],
           "card": {
-            "card_id": "tok_abc123",
+            "card_id": "b7e2c1a4-3f5d-4e6a-9c8b-1d2e3f4a5b6c",
             "card_pan_last": "4242"
           }
         }
@@ -242,7 +242,7 @@ Create a new recipient with personal information and payment details.
   "type": "Card",
   "currencies": ["USD", "EUR"],
   "card": {
-    "card_id": "tok_abc123def456",
+    "card_id": "b7e2c1a4-3f5d-4e6a-9c8b-1d2e3f4a5b6c",
     "card_pan_last": "1111"
   }
 }
@@ -376,7 +376,7 @@ Request object key matches the type: `card`, `sepa`, `ach`, `crypto`, `faster_pa
       "type": "Card",
       "currencies": ["USD", "EUR"],
       "card": {
-        "card_id": "tok_abc123def456",
+        "card_id": "b7e2c1a4-3f5d-4e6a-9c8b-1d2e3f4a5b6c",
         "card_pan_last": "1111"
       }
     }
@@ -413,7 +413,7 @@ Add additional payment details to an existing recipient. A single recipient can 
 
 The body structure depends on the payment type. Include `type`, `currencies`, and the type-specific nested object (see [Payment Type Fields](#payment-type-fields) below).
 
-**Response:** the guides show `{ "id": "uuid-new-pd" }`; the API reference returns a full payment-details object (`id`, `type`, `currencies`, type object).
+**Response:** the new payment detail: `id`, `type`, `currencies`, type object (the guides previously showed only `{ "id": ... }`).
 
 ---
 
@@ -539,6 +539,12 @@ No body returned (the API reference lists `200` with an empty object).
 
 ---
 
+## Agent Companies
+
+For a company whose users' accounts are operated by AI agents, recipients cannot be edited: every `PUT` and every `POST`/`PUT`/`DELETE` on `.../payment_details` returns `403 ErrorPermissionDenied`. Delete the recipient and create a new one. Your Wirex account manager sets this mode. `POST /api/v2/recipients` also accepts an optional `transaction_authorization`, verified only for agent companies in `Signature` mode.
+
+---
+
 ## Payment Type Fields
 
 Each payment type requires different fields when creating or updating payment details.
@@ -547,7 +553,7 @@ Each payment type requires different fields when creating or updating payment de
 
 | Field         | Type   | Required | Description                              |
 |--------------|--------|----------|------------------------------------------|
-| card_id       | string | Yes      | Token from PCI tokenization              |
+| card_id       | string | Yes      | Card token (UUID) from PCI tokenization; pass the same value as `external_card_id` on the card transfer |
 | card_pan_last | string | Yes      | Last 4 digits of the card number         |
 
 ### Sepa
