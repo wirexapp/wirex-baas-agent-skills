@@ -1,18 +1,18 @@
 evals:
   - question: "How do I get started with the Wirex BaaS sandbox? What are the test credentials and what is the Helper API base URL?"
     criteria:
-      - "Provides the sandbox client_id (9qgK7xzQirmJgZi9zOamLXQ6dQ7KpUu9)"
+      - "Provides the sandbox client_id (3fCeoWq6FOtKJBZiyorXnxE41Dqp2zKB)"
       - "Specifies ramc.wirexapp.tech as the Helper API base URL"
       - "Does NOT recommend the production URL (api-baas.wirexapp.com) for getting started"
 
   - question: "How do I simulate a SEPA bank deposit in the sandbox? What Helper API endpoint do I call and what fields are required?"
     criteria:
       - "Specifies /bank/sepa/deposit as the endpoint"
-      - "Lists region, email, and amount as required fields"
+      - "Lists email and amount as required fields (region optional, GB)"
       - "Does NOT say Bearer token or Authorization header is needed for the Helper API"
 
   - question: "What card transaction types can I simulate in the sandbox, and what fields do the simulation endpoints accept?"
     criteria:
-      - "Lists POS (/card/transaction/pos), EPOS (/card/transaction/epos), ATM (/card/transaction/atm), and Credit (/card/transaction/credit) as simulation types"
-      - "States that cardId and amount are the required fields"
-      - "Mentions that card credit simulates a refund or adds funds back"
+      - "Lists POS (/card/auth-and-clearing), EPOS (/card/epos-auth-and-clearing), ATM (/card/atm-auth-and-clearing) and Original Credit (/card/original-credit) as simulation types"
+      - "States that cardId, amount, currency, settlementAmount and settlementCurrency are the required fields"
+      - "Mentions /card/standalone-refund for refunds"

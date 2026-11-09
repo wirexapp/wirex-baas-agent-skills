@@ -68,6 +68,9 @@ def _run_claude(prompt: str, system_prompt: str, max_turns: int = 1) -> str:
             "--tools", "",
             "--max-turns", str(max_turns),
             "--output-format", "text",
+            # Without this the user's own settings (hooks, CLAUDE.md-driven
+            # behaviour) leak into the "isolated" run and skew the answers.
+            "--setting-sources=",
         ],
         input=prompt,
         capture_output=True,

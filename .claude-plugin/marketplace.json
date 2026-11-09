@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Agent skills for Wirex BaaS — blockchain financial services platform providing AA wallets, KYC, cards, crypto, and banking via REST APIs.",
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "plugins": [
     {
@@ -13,12 +13,12 @@
       "source": ".",
       "skills": "./skills/",
       "description": "Wirex BaaS integration skills — AA wallets, KYC, Visa cards, crypto, SEPA/ACH transfers, webhooks, and sandbox testing.",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "author": {
         "name": "Wirex"
       },
       "homepage": "https://docs.wirexapp.com",
-      "repository": "https://github.com/wirexpay/wirex-baas-agent-skills",
+      "repository": "https://github.com/wirexapp/wirex-baas-agent-skills",
       "license": "Apache-2.0",
       "keywords": [
         "wirex",

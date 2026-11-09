@@ -3,7 +3,7 @@ evals:
     criteria:
       - "States that VisaVirtualCard capability is required"
       - "Specifies an endpoint for issuing virtual cards (POST to /api/v2/cards/virtual)"
-      - "Mentions that virtual cards are auto-activated on issuance"
+      - "States the card starts in Requested and moves to NotActivated once processed (docs retail-card-issuance)"
 
   - question: "How do I retrieve a card's PAN, CVV, and PIN? What security mechanism protects these details?"
     criteria:

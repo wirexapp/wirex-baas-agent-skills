@@ -10,7 +10,7 @@ evals:
     criteria:
       - "Specifies POST /api/v1/user/authorize as the endpoint"
       - "Mentions that a valid S2S token is needed first (in Authorization header)"
-      - "Lists X-Chain-Id and X-User-Address as required headers"
+      - "Lists X-Chain-Id and X-User-Wallet as required headers"
 
   - question: "How long are Wirex BaaS access tokens valid, and what is the recommended caching strategy?"
     criteria:

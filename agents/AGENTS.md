@@ -7,11 +7,11 @@ You MUST read the SKILL.md file whenever the description of the skills below mat
 ## Available Skills
 
 ### wirex-baas-overview
-Platform overview and getting started guide — start here for integration basics. Covers what Wirex BaaS is, the 5-step integration flow, API environments (sandbox and production URLs), sandbox test credentials, required headers, error handling, blockchain networks, token and contract addresses, MCP server setup, and supported countries.
+Platform overview and getting started guide — start here for integration basics. Covers what Wirex BaaS is, the 6-step integration flow, partner onboarding, API environments (sandbox and production URLs), sandbox test credentials, required headers, error handling, blockchain networks, token and contract addresses, MCP server setup, and supported countries.
 - [SKILL.md](../skills/wirex-baas-overview/SKILL.md)
 
 ### wirex-baas-auth
-Authentication — how to authenticate API requests. Server-to-Server OAuth2 token exchange, user-scoped token issuance, Privy-based authentication. Covers required headers, token caching strategy, and security best practices.
+Authentication — how to authenticate API requests. Server-to-Server OAuth2 token exchange, user-scoped token issuance, Privy-based authentication, action tokens and the X-User-Wallet identity header. Covers required headers, token caching strategy, and security best practices.
 - [SKILL.md](../skills/wirex-baas-auth/SKILL.md)
 
 ### wirex-baas-onboarding

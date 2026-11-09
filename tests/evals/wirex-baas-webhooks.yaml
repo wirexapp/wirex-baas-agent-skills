@@ -7,7 +7,7 @@ evals:
 
   - question: "How do I query a user's transaction history as a fallback for missed webhooks? What endpoint, pagination, and filters are available?"
     criteria:
-      - "Specifies GET /api/v1/activity/feed as the endpoint"
+      - "Specifies GET /api/v2/activity/feed (recommended) as the endpoint"
       - "Mentions page_number and page_size as pagination parameters"
       - "Mentions filtering by types (activity types) or subject"
       - "Notes that types and subject are mutually exclusive parameters"

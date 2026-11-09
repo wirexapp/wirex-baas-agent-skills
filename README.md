@@ -22,14 +22,14 @@ Agent skills for **Wirex BaaS** — a blockchain financial services platform pro
 Add the marketplace and install the plugin:
 
 ```bash
-/plugin marketplace add wirexpay/wirex-baas-agent-skills
+/plugin marketplace add wirexapp/wirex-baas-agent-skills
 /plugin install wirex-baas@wirex-baas-agent-skills
 ```
 
 Or load directly from a local clone:
 
 ```bash
-git clone https://github.com/wirexpay/wirex-baas-agent-skills.git
+git clone https://github.com/wirexapp/wirex-baas-agent-skills.git
 claude --plugin-dir ./wirex-baas-agent-skills
 ```
 
@@ -38,7 +38,7 @@ claude --plugin-dir ./wirex-baas-agent-skills
 Clone and the `agents/AGENTS.md` file provides automatic skill discovery:
 
 ```bash
-git clone https://github.com/wirexpay/wirex-baas-agent-skills.git
+git clone https://github.com/wirexapp/wirex-baas-agent-skills.git
 ```
 
 Or install individual skills with the built-in skill installer from within a Codex session.
@@ -53,13 +53,13 @@ Install into any supported agent using the [skills CLI](https://github.com/verce
 
 ```bash
 # Install all skills
-npx skills add wirexpay/wirex-baas-agent-skills --all
+npx skills add wirexapp/wirex-baas-agent-skills --all
 
 # Install a specific skill
-npx skills add wirexpay/wirex-baas-agent-skills --skill wirex-baas-auth
+npx skills add wirexapp/wirex-baas-agent-skills --skill wirex-baas-auth
 
 # Install to a specific agent
-npx skills add wirexpay/wirex-baas-agent-skills -a claude-code --all
+npx skills add wirexapp/wirex-baas-agent-skills -a claude-code --all
 ```
 
 ### Generic Agents (agentskills.io)

@@ -12,7 +12,7 @@ evals:
       - "Lists CategoryValidationFailure (400) as one of the error categories"
       - "Lists CategoryUnauthorized (401) as one of the error categories"
 
-  - question: "What are the five steps of the Wirex BaaS integration flow, and what blockchain chain ID should I use for sandbox development on Base Sepolia?"
+  - question: "What are the steps of the Wirex BaaS integration flow, and what blockchain chain ID should I use for sandbox development on Base Sepolia?"
     criteria:
       - "Mentions authentication / token exchange as one of the steps"
       - "Mentions user registration as one of the steps"

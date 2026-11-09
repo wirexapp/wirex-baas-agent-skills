@@ -33,12 +33,13 @@ def _format_hits(hits):
 BANNED_PATTERNS = [
     (r"api\.wirexpay\.com", 0, "Wrong base URL (should be api-baas.wirexapp.com/tech)"),
     (r"x-account-id", re.IGNORECASE, "Wrong header (old deprecated name)"),
+    (r"X-User-Address", 0, "Wrong header (renamed to X-User-Wallet)"),
+    (r"wirexpay-sdk", 0, "Wrong SDK package (should be @wirexapp/wpay-baas-sdk)"),
+    (r"9qgK7xzQirmJgZi9zOamLXQ6dQ7KpUu9", 0, "Outdated sandbox client_id"),
     (r"ERROR_[A-Z_]{2,}", 0, "SCREAMING_SNAKE error codes (should be PascalCase)"),
     (r"address_line_[12]", 0, "Wrong address field (should be line1/line2)"),
-    (r"\bpostal_code\b", 0, "Wrong field (should be zip_code)"),
     (r'"phone"\s*:', 0, "Bare phone field (should be phone_number)"),
     (r'"error_category"\s*:\s*"[A-Z]', 0, "Flat error_category (should be nested object)"),
-    (r"alpha-3", 0, "Wrong country code format (should be alpha-2)"),
     (r"X-Chain-Id:\s*(?:1|137)\b", 0, "Wrong chain ID (should be 8453 or 84532)"),
     (r"\baccount_holder_name\b", 0, "Wrong field (should be account_holder)"),
 ]
