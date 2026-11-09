@@ -1,0 +1,18 @@
+evals:
+  - question: "How do I install and initialize the Wirex BaaS TypeScript SDK for the sandbox, and what must the wallet client I pass in support?"
+    criteria:
+      - "Installs @wirexapp/wpay-baas-sdk together with viem"
+      - "Calls createSDK (awaited) with env 'dev', companyId and getMainWalletClient"
+      - "States the wallet's EIP-1193 provider must handle eth_accounts, personal_sign and eth_signTypedData_v4"
+
+  - question: "A new user's smart wallet has neither the policy nor the executor installed. How do I set it up and register it in the Accounts contract with as few signatures as possible using the SDK?"
+    criteria:
+      - "Uses sdk.crypto.onboarding.allInOneStepOnboarding() as a single UserOperation / single signature"
+      - "States it applies only when neither the executor nor the policy is installed"
+      - "Mentions the per-step alternative (signInPolicyAndExecutor and registerInAccounts) for other cases"
+
+  - question: "How do I swap USDC to EURC with the Wirex SDK?"
+    criteria:
+      - "Calls sdk.api.baas.swap.estimate with exactly one of source_asset_amount or destination_asset_amount"
+      - "Pays on-chain with sdk.crypto.transfer.makeTransferWithoutDelayPolicy to the estimate's destination_address"
+      - "Calls sdk.api.baas.swap.execute with estimation_id and payment_transaction_hash"

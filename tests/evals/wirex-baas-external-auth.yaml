@@ -1,0 +1,12 @@
+evals:
+  - question: "What is Wirex BaaS External Authorization and how does it differ from the standard flow?"
+    criteria:
+      - "States the partner manages user balances in its own system"
+      - "States transactions settle against a partner-prefunded Master Account"
+      - "States no per-user Smart Wallet deployment or on-chain registration is needed"
+
+  - question: "What must my authorize endpoint return to Wirex, and what happens to mandatory transactions if I decline?"
+    criteria:
+      - "Response contains transaction_id and is_allowed"
+      - "Mentions optional decline_reason (InsufficientFunds or GeneralError)"
+      - "States mandatory transactions are processed even when declined"

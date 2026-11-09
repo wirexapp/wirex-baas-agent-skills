@@ -1,0 +1,18 @@
+evals:
+  - question: "Which npm packages does the Wirex PCI SDK provide for top-up card collection, payout card collection and card reveal?"
+    criteria:
+      - "Names @wirexapp/card-topup-web for top-up card collection"
+      - "Names @wirexapp/card-oct-web for payout (OCT) card collection"
+      - "Names @wirexapp/card-reveal-web for revealing card details"
+
+  - question: "What token must getBearerToken return for the PCI SDK, and how does my backend obtain it?"
+    criteria:
+      - "States it must be a user token, not the S2S company token"
+      - "Describes POST /api/v1/user/authorize called by the backend with the S2S token"
+      - "Mentions exactly one identity header such as X-User-Wallet (the EOA), X-User-Email or X-User-Id"
+
+  - question: "What Content Security Policy does my page need for the Wirex PCI SDK frames?"
+    criteria:
+      - "Includes frame-src with the Wirex frame origin (https://frames.wirexapp.com in production)"
+      - "Mentions the 3DS orchestrator origin also belongs in frame-src"
+      - "States no connect-src entry is needed"

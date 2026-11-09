@@ -2,250 +2,166 @@
 
 ## Architecture Overview
 
-Wirex BaaS wallets are **ERC-4337 Account Abstraction smart wallets** built on the **Kernel v3.1 Smart Account** framework. Each wallet is deployed with two mandatory modules:
+Wirex BaaS wallets are Account Abstraction smart wallets built on the **Kernel v3.1 Smart Account** framework, deployed on Base and registered in the Wirex Accounts contract. Before calling the Wirex API to register a user: (1) the Smart Wallet must be deployed, (2) the required policy and executor must be installed, (3) the wallet must be registered in the Accounts smart contract. The Wirex API validates that wallets are registered before accepting API registration requests.
 
-| Module | Role | Description |
-|--------|------|-------------|
-| **FundsManagement Executor** | Fund operations | Handles on-chain debits for card transactions, transfer routing, and banking settlement flows |
-| **ExecutionDelayPolicy** | Security | Enforces a configurable time delay on sensitive operations (e.g., large withdrawals, module changes) |
+| Component | Role | Description |
+|-----------|------|-------------|
+| **Kernel v3.1 Smart Account** | Wallet | Controlled by the user's EOA as signer; modular (validators, executors, policies); gas sponsorship via paymasters; batched transactions |
+| **FundsManagement Executor** | Fund operations | Executor module (module type 2). Grants the Wirex oracle permission to execute specific predefined operations (card payments, withdrawals, card top-ups, fiat withdrawals). The oracle cannot arbitrarily move funds |
+| **ExecutionDelayPolicy** | Security | Policy installed as the **root validator** (via `changeRootValidator`). Enforces a time delay on sensitive operations, lets the user cancel pending transactions within the delay window. Mandatory for all Wirex wallets |
+| **Accounts contract registration** | Registry | Links the Smart Wallet to your `parentEntity` (`partner_id`, 16-byte / `bytes16`), lets Wirex associate the wallet with a user, records account and verification status on-chain |
 
-### Smart Account Structure
-
-**Kernel v3.1 Smart Account** contains: Root Validator (ECDSA owner) + FundsManagement Executor (module type 2) + ExecutionDelayPolicy (module type 1).
-
-The **EOA (Externally Owned Account)** serves as the root validator / owner. The smart wallet address is derived deterministically from the EOA and the account factory parameters.
+The **EOA (Externally Owned Account)** is the signer/owner. The `user_address` sent to `POST /api/v2/user` is this EOA, not the Smart Wallet address.
 
 ---
 
 ## Deployment Options
 
-### Option 1: Wirex SDK (`@wirexapp/wirexpay-sdk`)
+| Option | Description |
+|--------|-------------|
+| **Wirex SDK** (Recommended) | `@wirexapp/wpay-baas-sdk`; abstracts deployment and configuration |
+| **Direct Deployment (EVM)** | ZeroDev SDK for Kernel v3.1 wallets on Base |
+| **Direct Deployment (Stellar)** | Crossmint SDK for Stellar smart wallets |
 
-This is the **primary and recommended** integration path for EVM chains.
+### Option 1: Wirex SDK (`@wirexapp/wpay-baas-sdk`)
 
-#### Installation
+Requires Node.js >= 18 and `viem ^2.49.3` (peer dependency).
 
 ```bash
-npm install @wirexapp/wirexpay-sdk
+npm install @wirexapp/wpay-baas-sdk viem
 ```
-
-#### SDK Configuration
 
 ```typescript
-import { createSDK } from '@wirexapp/wirexpay-sdk';
+import { createSDK } from '@wirexapp/wpay-baas-sdk';
 
 const sdk = await createSDK({
-  env: 'production', // or 'sandbox'
-  companyId: '0x00000000000000000000000000000007', // partner_id
-  enableLogging: true,
-  getMainWalletClient: async () => {
-    return mainWalletClient; // User's EOA from Privy, WalletConnect, etc.
-  },
+  env: 'prod', // 'dev' | 'prod'; chain follows `chainId` or the remote config `defaultChain`
+  companyId: process.env.COMPANY_ID, // your partner_id (hex) from Wirex onboarding
+  enableLogging: true, // optional
+  getMainWalletClient: async () => mainWalletClient, // user's EOA wallet client (Privy, WalletConnect, raw key adapter, ...)
 });
 ```
+
+`getMainWalletClient` must return an object with `address` and `getEthereumProvider()`; the EIP-1193 provider must handle at least `eth_accounts`, `personal_sign` and `eth_signTypedData_v4`.
+
+> **Docs inconsistency:** the Wallet Deployment guide shows `env: 'production' | 'sandbox'`; the TypeScript SDK reference documents `env: 'dev' | 'prod'` (used here).
 
 #### SDK Methods
 
 | Module | Method | Purpose |
 |--------|--------|---------|
-| `sdk.crypto.accountAbstraction` | `isPolicyInstalled()` | Check if ExecutionDelayPolicy is installed |
+| `sdk.crypto.wallet` | `getSmartWalletAddress()` | Get the Smart Wallet address |
+| `sdk.crypto.wallet` | `getSmartWalletClient()` | Get Kernel account client |
+| `sdk.crypto.accountAbstraction` | `isPolicyInstalled()` | Check if ExecutionDelayPolicy is installed (as root validator) |
 | `sdk.crypto.accountAbstraction` | `isExecutorInstalled()` | Check if FundsManagement Executor is installed |
-| `sdk.crypto.accountAbstraction` | `signInPolicyAndExecutor()` | Install both modules in a single UserOp |
+| `sdk.crypto.accountAbstraction` | `signInPolicyAndExecutor()` | Install both in one UserOperation |
 | `sdk.crypto.accountAbstraction` | `signInPolicy()` | Install policy only |
 | `sdk.crypto.accountAbstraction` | `signInExecutor()` | Install executor only |
-| `sdk.crypto.accountContract` | `isWalletInAccounts()` | Check if registered in on-chain accounts |
-| `sdk.crypto.accountContract` | `registerInAccounts()` | Register in on-chain accounts |
-| `sdk.crypto.wallet` | `getSmartWalletClient()` | Get Kernel account client |
+| `sdk.crypto.accountContract` | `isWalletInAccounts()` | Check registration in the retail Accounts contract |
+| `sdk.crypto.accountContract` | `registerInAccounts()` | Register wallet (retail) |
+| `sdk.crypto.onboarding` | `allInOneStepOnboarding()` | Executor install + policy switch + Accounts registration in one UserOperation (one signature); only when neither module is installed |
 
-#### Full Deployment Flow (Wirex SDK)
+#### Deployment Flow
 
 ```typescript
-import { createSDK } from '@wirexapp/wirexpay-sdk';
-import { createWalletClient, http } from 'viem';
-import { base } from 'viem/chains';
-import { privateKeyToAccount } from 'viem/accounts';
-
-// 1. Create signer from EOA private key
-const account = privateKeyToAccount('0xYOUR_PRIVATE_KEY');
-const mainWalletClient = createWalletClient({
-  account,
-  chain: base,
-  transport: http('https://mainnet.base.org'),
-});
-
-// 2. Initialize SDK
-const sdk = await createSDK({
-  env: 'production', // or 'sandbox'
-  companyId: '0x00000000000000000000000000000007', // partner_id
-  enableLogging: true,
-  getMainWalletClient: async () => mainWalletClient,
-});
-
-// 3. Check current module state
+// 1. Check module state
 const policyInstalled = await sdk.crypto.accountAbstraction.isPolicyInstalled();
 const executorInstalled = await sdk.crypto.accountAbstraction.isExecutorInstalled();
 
-console.log(`Policy installed: ${policyInstalled}`);
-console.log(`Executor installed: ${executorInstalled}`);
-
-// 4. Deploy wallet with modules (if not already installed)
-if (!policyInstalled || !executorInstalled) {
+// 2a. Fresh wallet: everything in one UserOperation, the user signs once
+if (!policyInstalled && !executorInstalled) {
+  await sdk.crypto.onboarding.allInOneStepOnboarding(); // also registers in Accounts
+}
+// 2b. Otherwise install the missing modules
+else if (!policyInstalled || !executorInstalled) {
   await sdk.crypto.accountAbstraction.signInPolicyAndExecutor();
-  console.log('Wallet deployed with modules.');
 }
 
-// 5. Register in on-chain accounts registry
+// 3. Register in Accounts contract
 const isRegistered = await sdk.crypto.accountContract.isWalletInAccounts();
 if (!isRegistered) {
   await sdk.crypto.accountContract.registerInAccounts();
-  console.log('Wallet registered in Accounts contract.');
 }
-
-console.log('Wallet deployment complete.');
 ```
+
+Then wait for the `/v2/webhooks/wallets` webhook and call `POST /api/v2/user`.
 
 ---
 
-### Option 2: ZeroDev SDK
-
-For partners already using the ZeroDev ecosystem.
-
-#### Dependencies
+### Option 2: ZeroDev SDK (EVM)
 
 ```bash
-npm install @zerodev/sdk @zerodev/ecdsa-validator permissionless viem
+npm install @zerodev/sdk @zerodev/ecdsa-validator @zerodev/permissions viem
 ```
 
-#### Configuration
+Wirex provides during onboarding:
 
-```typescript
-import { createKernelAccount, createKernelAccountClient, createZeroDevPaymasterClient } from '@zerodev/sdk';
-import { signerToEcdsaValidator } from '@zerodev/ecdsa-validator';
-import { http, createPublicClient } from 'viem';
-import { polygon } from 'viem/chains';
-import { ENTRYPOINT_ADDRESS_V07 } from 'permissionless';
+| Configuration | Description |
+|---------------|-------------|
+| `bundlerRpc` | ZeroDev bundler endpoint |
+| `paymasterRpc` | ZeroDev paymaster endpoint for gas sponsorship |
+| `rpcUrl` | Blockchain RPC endpoint |
+| `contractRegistryAddress` | Address used to resolve all other contract addresses |
+| `partnerId` | Your 16-byte on-chain identifier |
 
-const config = {
-  bundlerRpc: 'https://bundler.wirexpay.com/v1/polygon',
-  paymasterRpc: 'https://paymaster.wirexpay.com/v1/polygon',
-  rpcUrl: 'https://polygon-rpc.com',
-  contractRegistryAddress: '0xContractRegistryAddress',
-  partnerId: 'partner-abc',
-};
-```
+Key points (condensed from the Wallet Deployment guide; see the ABI Reference for ABIs):
 
-#### Key Functions
-
-```typescript
-// Create public client
-const publicClient = createPublicClient({
-  chain: polygon,
-  transport: http(config.rpcUrl),
-});
-
-// Create ECDSA validator from signer
-const ecdsaValidator = await signerToEcdsaValidator(publicClient, {
-  signer: account,        // LocalAccount from viem
-  entryPoint: ENTRYPOINT_ADDRESS_V07,
-});
-
-// Create Kernel account
-const kernelAccount = await createKernelAccount(publicClient, {
-  plugins: {
-    sudo: ecdsaValidator,
-  },
-  entryPoint: ENTRYPOINT_ADDRESS_V07,
-  kernelVersion: '0.3.1', // Kernel v3.1
-});
-
-// Create account client with paymaster
-const kernelClient = createKernelAccountClient({
-  account: kernelAccount,
-  chain: polygon,
-  entryPoint: ENTRYPOINT_ADDRESS_V07,
-  bundlerTransport: http(config.bundlerRpc),
-  middleware: {
-    sponsorUserOperation: async ({ userOperation }) => {
-      const paymasterClient = createZeroDevPaymasterClient({
-        chain: polygon,
-        transport: http(config.paymasterRpc),
-        entryPoint: ENTRYPOINT_ADDRESS_V07,
-      });
-      return paymasterClient.sponsorUserOperation({
-        userOperation,
-        entryPoint: ENTRYPOINT_ADDRESS_V07,
-      });
-    },
-  },
-});
-
-// Install modules via UserOp
-const installTxHash = await kernelClient.sendUserOperation({
-  userOperation: {
-    callData: encodeFunctionData({
-      // ... install executor and policy calls
-    }),
-  },
-});
-```
+1. **Resolve contracts** from the ContractRegistry with `contractByName(name)` for `Accounts`, `FundsManagement`, `ExecutionDelayPolicy`.
+2. **Create the Kernel account** with `createKernelAccount` (`kernelVersion: KERNEL_V3_1`, EntryPoint 0.7) using an ECDSA validator (`signerToEcdsaValidator`) as `sudo` for the initial deployment; use a paymaster client for gas sponsorship.
+3. **Build three batched calls** and send them as **one UserOperation**:
+   - `changeRootValidator(rootValidatorId, zeroAddress, enableData, '0x')` on the Kernel account -- installs ExecutionDelayPolicy as root validator (a permission validator with `toSudoPolicy({ policyAddress: executionDelayPolicy })`; `rootValidatorId = VALIDATOR_TYPE.PERMISSION` + identifier padded to 20 bytes);
+   - `installModule(2, fundsManagementAddress, concatHex([zeroAddress, zeroHash]))` on the Kernel account -- installs the executor (module type 2);
+   - `createUserAccountWithWallet(partnerId)` on the Accounts contract.
+4. **Subsequent operations** use a client built with the policy validator (`toPermissionValidator` with the ExecutionDelayPolicy, `address` set to the policy address) pointing at the existing wallet address; the initial deployment uses the plain ECDSA validator.
 
 ---
 
 ### Option 3: Crossmint SDK (Stellar)
 
-For Stellar-based deployments using the Crossmint infrastructure.
+Stellar smart wallets use Crossmint's smart wallet infrastructure. Contact Wirex for Stellar-specific integration documentation and contract addresses.
 
-#### Setup
+1. Initialize the Crossmint wallet via `@crossmint/client-sdk-react-ui`.
+2. Install the execution delay plugin on the smart wallet.
+3. Register in the Accounts contract with your `partner_id`.
 
-```typescript
-import { CrossmintWalletSDK } from '@crossmint/wallet-sdk';
-
-const crossmint = CrossmintWalletSDK.init({
-  apiKey: 'YOUR_CROSSMINT_API_KEY',
-  chain: 'stellar',
-  environment: 'production', // or 'staging'
-});
-
-// Create wallet for user
-const wallet = await crossmint.createWallet({
-  userId: 'user-identifier',
-  linkedUser: {
-    email: 'user@example.com',
-  },
-});
-
-console.log(`Stellar wallet address: ${wallet.address}`);
-```
-
-> **Note:** Stellar wallets follow a different on-chain model. The FundsManagement and ExecutionDelayPolicy modules are specific to EVM chains. Stellar integration uses Crossmint's custodial abstraction layer.
+| Configuration from Wirex | Description |
+|--------------------------|-------------|
+| Crossmint API Key | For wallet initialization |
+| Plugin Contract ID | Execution delay policy address |
+| Accounts Contract ID | For user registration |
+| Partner ID | 16-byte identifier (without `0x` prefix for Stellar) |
 
 ---
 
-## On-Chain Flow Sequence (8 Steps)
+## Contract Addresses
 
-The complete on-chain deployment follows this sequence:
+Contract addresses differ per chain and environment (Sandbox/Production). Contact Wirex during onboarding for: **Accounts** (user registration), **FundsManagement** (executor for oracle transactions), **ExecutionDelayPolicy** (time-lock policy), **TokensRegistry** (supported token list). ContractRegistry addresses are in the Platform Overview.
 
-| Step | Action | Transaction Type | Description |
-|------|--------|-----------------|-------------|
-| 1 | **Create EOA** | Off-chain | Generate or import an EOA keypair |
-| 2 | **Compute Smart Account Address** | Off-chain | Deterministically derive the smart wallet address from EOA + factory params |
-| 3 | **Deploy Smart Account** | UserOperation | Send the first UserOp; the EntryPoint deploys the Kernel v3.1 account via the factory |
-| 4 | **Install ExecutionDelayPolicy** | UserOperation | Install the policy module (module type 1) into the kernel |
-| 5 | **Install FundsManagement Executor** | UserOperation | Install the executor module (module type 2) into the kernel |
-| 6 | **Register in Accounts Registry** | UserOperation | Call `createUserAccountWithWallet(partnerId)` on Accounts contract. Emits `UserAccountCreated` event. |
-| 7 | **Verify Installation** | Read call | Confirm modules are installed and root validator is correct |
-| 8 | **Webhook Confirmation** | Off-chain | Wirex backend sends wallet webhook to partner |
+---
 
-> **Optimization:** Steps 3-5 can be batched into a single UserOperation using `signInPolicyAndExecutor()` in the Wirex SDK, reducing gas costs and latency.
+## On-Chain Flow Sequence
+
+| Step | Action | Description |
+|------|--------|-------------|
+| 1 | **Create signer** | From Privy, a private key, or WalletConnect |
+| 2 | **Deploy Smart Wallet** | Single UserOperation with batched calls |
+| 3 | **Install executor** | `installModule` (FundsManagement, module type 2) |
+| 4 | **Install policy** | `changeRootValidator` (ExecutionDelayPolicy as root validator) |
+| 5 | **Register on-chain** | `createUserAccountWithWallet(partnerId)` in the Accounts contract |
+| 6 | **Event emitted** | Wirex listener detects `UserAccountCreated(parentEntity, owner)` |
+| 7 | **Wirex verifies** | Backend checks the modules are installed and creates its internal record |
+| 8 | **Webhook sent** | You receive the wallet confirmation at `/v2/webhooks/wallets` |
+
+> With the ZeroDev flow, steps 2-5 are one batched UserOperation; with the Wirex SDK, `signInPolicyAndExecutor()` installs both modules in one UserOperation and `registerInAccounts()` registers separately.
 
 ---
 
 ## Wallet Webhook
 
-When the wallet is deployed and registered, the Wirex backend fires a webhook:
+When a wallet is registered on-chain, Wirex sends a webhook to your configured endpoint:
 
 ```
-POST /v2/webhooks/wallets
+POST {your_webhook_base_url}/v2/webhooks/wallets
 ```
 
 ### Webhook Payload
@@ -274,14 +190,14 @@ POST /v2/webhooks/wallets
 
 | Status | Meaning |
 |--------|---------|
-| `Confirmed` | Wallet properly configured with required modules |
-| `Rejected` | Wallet configuration invalid or incomplete |
+| `Confirmed` | Wallet is properly configured as a Smart Wallet with required modules |
+| `Rejected` | Wallet configuration is invalid or incomplete |
 | `Unknown` | Status could not be determined |
 
 ### Webhook Handling Rules
 
-- Wirex expects **2xx response within 10 seconds**
-- Failed deliveries are logged but **NOT automatically retried**
+- Wirex expects a **2xx response within 10 seconds**
+- A failed delivery is retried up to 5 times with exponential backoff, then dropped; retries can arrive out of order and more than once
 - Implement idempotent handlers for duplicate events
 - Contact Wirex support for event replay
 
@@ -289,119 +205,54 @@ POST /v2/webhooks/wallets
 
 ## Verification
 
-After deployment, verify the wallet state with on-chain read calls.
-
-### Check Module Installation
+If your application does not persist Smart Wallet setup state, use on-chain read calls to determine whether the wallet was created, modules installed and registration completed.
 
 ```typescript
-// Check if FundsManagement Executor is installed (module type 2)
-const executorInstalled = await publicClient.readContract({
-  address: smartAccountAddress,
-  abi: kernelAbi,
-  functionName: 'isModuleInstalled',
-  args: [
-    2, // module type: executor
-    fundsManagementAddress,
-    '0x', // additional data
-  ],
-});
+import { KernelV3_1AccountAbi } from '@zerodev/sdk';
+import { AccountsAbi } from './abi'; // see the ABI Reference
 
-// Check if ExecutionDelayPolicy is installed (module type 1)
-const policyInstalled = await publicClient.readContract({
-  address: smartAccountAddress,
-  abi: kernelAbi,
-  functionName: 'isModuleInstalled',
-  args: [
-    1, // module type: policy / validator
-    executionDelayPolicyAddress,
-    '0x', // additional data
-  ],
-});
-```
-
-### Check Root Validator
-
-```typescript
-// Verify the EOA is the root validator (owner)
-const rootValidator = await publicClient.readContract({
-  address: smartAccountAddress,
-  abi: kernelAbi,
-  functionName: 'rootValidator',
-});
-
-// rootValidator should match the ECDSA validator address
-console.log(`Root validator: ${rootValidator}`);
-```
-
-### Check Accounts Registry
-
-```typescript
-// Verify the wallet is registered in the accounts contract
-const userAccount = await publicClient.readContract({
-  address: accountsRegistryAddress,
-  abi: accountsRegistryAbi,
-  functionName: 'getUserAccount',
-  args: [eoaAddress],
-});
-
-// userAccount should return the smart wallet address
-console.log(`Registered smart wallet: ${userAccount}`);
-```
-
-### Complete Verification Example
-
-```typescript
-async function verifyWalletDeployment(
-  publicClient: PublicClient,
-  smartAccountAddress: `0x${string}`,
-  eoaAddress: `0x${string}`,
-  fundsManagementAddress: `0x${string}`,
-  executionDelayPolicyAddress: `0x${string}`,
-  accountsRegistryAddress: `0x${string}`,
-): Promise<boolean> {
-  // 1. Check executor
-  const executorOk = await publicClient.readContract({
-    address: smartAccountAddress,
-    abi: kernelAbi,
+async function verifyWalletSetup(publicClient, smartWalletAddress, contracts, partnerId) {
+  // 1. Executor installed? (moduleType 2 = Executor)
+  const isExecutorInstalled = await publicClient.readContract({
+    address: smartWalletAddress,
+    abi: KernelV3_1AccountAbi,
     functionName: 'isModuleInstalled',
-    args: [2, fundsManagementAddress, '0x'],
+    args: [BigInt(2), contracts.fundsManagement, '0x'],
   });
 
-  // 2. Check policy
-  const policyOk = await publicClient.readContract({
-    address: smartAccountAddress,
-    abi: kernelAbi,
-    functionName: 'isModuleInstalled',
-    args: [1, executionDelayPolicyAddress, '0x'],
+  // 2. Policy installed? (root validator set)
+  const rootValidator = await publicClient.readContract({
+    address: smartWalletAddress,
+    abi: KernelV3_1AccountAbi,
+    functionName: 'rootValidator',
   });
+  const isPolicyInstalled = !!rootValidator && rootValidator !== '0x';
 
-  // 3. Check accounts registry
-  const registeredWallet = await publicClient.readContract({
-    address: accountsRegistryAddress,
-    abi: accountsRegistryAbi,
-    functionName: 'getUserAccount',
-    args: [eoaAddress],
-  });
-
-  const registryOk =
-    registeredWallet.toLowerCase() === smartAccountAddress.toLowerCase();
-
-  console.log(`Executor installed: ${executorOk}`);
-  console.log(`Policy installed: ${policyOk}`);
-  console.log(`Registry correct: ${registryOk}`);
-
-  return executorOk && policyOk && registryOk;
+  // 3. Registered in the Accounts contract?
+  try {
+    const account = await publicClient.readContract({
+      address: contracts.accounts,
+      abi: AccountsAbi,
+      functionName: 'getUserAccount',
+      args: [smartWalletAddress, partnerId], // (owner, parentEntity)
+    });
+    const isRegistered = account && account.status !== 0;
+    return { isExecutorInstalled, isPolicyInstalled, isRegistered };
+  } catch {
+    return { isExecutorInstalled, isPolicyInstalled, isRegistered: false };
+  }
 }
 ```
 
----
+`getUserAccount(owner, parentEntity)` returns a tuple `(status, verificationStatus)`.
 
-## Troubleshooting
+| `status` | Meaning | `verificationStatus` | Meaning |
+|----------|---------|----------------------|---------|
+| 0 | None (not registered) | 0 | None |
+| 1 | Pending | 1 | Applied |
+| 2 | Active | 2 | InReview |
+| 3 | Blocked | 3 | Approved |
+| 4 | Deleted | 4 | Rejected |
 
-| Issue | Cause | Resolution |
-|-------|-------|------------|
-| `signInPolicyAndExecutor()` reverts | Insufficient gas sponsorship or invalid bundler URL | Verify `bundlerRpc` and `paymasterRpc` are correct and the partner account has sponsorship credits |
-| `isModuleInstalled` returns `false` after deployment | Transaction not yet confirmed | Wait for block confirmation; poll with a short delay |
-| `registerInAccounts()` fails | Wallet not yet deployed on-chain | Ensure the deploy UserOp is confirmed before calling register |
-| Webhook not received | Webhook URL not configured or unreachable | Verify webhook endpoint in partner dashboard; check firewall rules |
-| Smart wallet address mismatch | Wrong factory params or chain ID | Ensure `chainId`, `contractRegistryAddress`, and `partnerId` match the target environment |
+The Accounts ABI also exposes `getWallet(parentEntity, wallet)` returning `(confirmationStatus, owner)`.
+

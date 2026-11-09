@@ -14,7 +14,7 @@ evals:
   - question: "How do I send an ACH bank transfer? How does the ACH setup differ from SEPA regarding bank account activation?"
     criteria:
       - "States that AchAccount capability is required"
-      - "Explains that ACH requires an explicit activation call (POST /api/v1/bank/accounts) unlike SEPA"
+      - "Explains that the account needs an explicit activation call (POST /api/v1/bank/accounts); since changelog sepa-account-activation SEPA does too"
       - "Mentions GET /api/v1/bank/accounts to retrieve bank details"
 
   - question: "How does Push-to-Card work? What are the steps from card tokenization to sending the payment?"

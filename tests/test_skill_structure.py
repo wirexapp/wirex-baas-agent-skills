@@ -70,7 +70,7 @@ class TestDirectoryStructure:
         unexpected = entries - allowed
         assert not unexpected, f"Unexpected entries: {unexpected}"
 
-    def test_all_eight_skills_present(self):
+    def test_all_skills_present(self):
         actual = sorted(d.name for d in SKILLS_DIR.iterdir() if d.is_dir())
         assert actual == sorted(SKILL_NAMES)
 

@@ -14,6 +14,10 @@ Agent skills for **Wirex BaaS** — a blockchain financial services platform pro
 | `wirex-baas-transfers` | SEPA/ACH bank transfers, Push-to-Card, recipient management |
 | `wirex-baas-webhooks` | All webhook endpoints, payload formats, activity history feed |
 | `wirex-baas-sandbox` | Helper API for test simulations (mint tokens, SEPA/ACH/card transactions) |
+| `wirex-baas-corporate` | Corporate API: KYB onboarding, employees and roles, corporate wallets, cards, transfers, webhooks |
+| `wirex-baas-sdk` | TypeScript/JavaScript SDK `@wirexapp/wpay-baas-sdk`: setup, auth, BaaS API, on-chain wallet operations |
+| `wirex-baas-pci-sdk` | PCI Compliant browser SDK: collect top-up/payout cards, reveal card details, 3DS element in Wirex iframes |
+| `wirex-baas-external-auth` | External Authorization model: partner authorize/settle endpoints, Master Account settlement, screening |
 
 ## Installation
 
@@ -22,14 +26,14 @@ Agent skills for **Wirex BaaS** — a blockchain financial services platform pro
 Add the marketplace and install the plugin:
 
 ```bash
-/plugin marketplace add wirexpay/wirex-baas-agent-skills
+/plugin marketplace add wirexapp/wirex-baas-agent-skills
 /plugin install wirex-baas@wirex-baas-agent-skills
 ```
 
 Or load directly from a local clone:
 
 ```bash
-git clone https://github.com/wirexpay/wirex-baas-agent-skills.git
+git clone https://github.com/wirexapp/wirex-baas-agent-skills.git
 claude --plugin-dir ./wirex-baas-agent-skills
 ```
 
@@ -38,7 +42,7 @@ claude --plugin-dir ./wirex-baas-agent-skills
 Clone and the `agents/AGENTS.md` file provides automatic skill discovery:
 
 ```bash
-git clone https://github.com/wirexpay/wirex-baas-agent-skills.git
+git clone https://github.com/wirexapp/wirex-baas-agent-skills.git
 ```
 
 Or install individual skills with the built-in skill installer from within a Codex session.
@@ -53,13 +57,13 @@ Install into any supported agent using the [skills CLI](https://github.com/verce
 
 ```bash
 # Install all skills
-npx skills add wirexpay/wirex-baas-agent-skills --all
+npx skills add wirexapp/wirex-baas-agent-skills --all
 
 # Install a specific skill
-npx skills add wirexpay/wirex-baas-agent-skills --skill wirex-baas-auth
+npx skills add wirexapp/wirex-baas-agent-skills --skill wirex-baas-auth
 
 # Install to a specific agent
-npx skills add wirexpay/wirex-baas-agent-skills -a claude-code --all
+npx skills add wirexapp/wirex-baas-agent-skills -a claude-code --all
 ```
 
 ### Generic Agents (agentskills.io)

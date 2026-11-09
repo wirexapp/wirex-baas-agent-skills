@@ -1,6 +1,6 @@
 # Card API Reference
 
-Complete API reference for all Wirex BaaS card management endpoints.
+Reference for Wirex BaaS retail card endpoints. Base URLs: sandbox `https://api-baas.wirexapp.tech`, production `https://api-baas.wirexapp.com`.
 
 ---
 
@@ -8,14 +8,13 @@ Complete API reference for all Wirex BaaS card management endpoints.
 
 - [Required Headers](#required-headers)
 - [Card Listing and Details](#card-listing-and-details)
-- [Card Issuance -- Virtual](#card-issuance--virtual)
-- [Card Issuance -- Physical](#card-issuance--physical)
-- [Delivery Options](#delivery-options)
-- [Card Lifecycle Management](#card-lifecycle-management)
+- [Card Order Fees and Delivery](#card-order-fees-and-delivery)
+- [Card Issuance](#card-issuance)
+- [Card Lifecycle Management](#card-lifecycle-management) (incl. [Reissue a Card](#reissue-a-card))
 - [Verification and Confirmation](#verification-and-confirmation)
 - [Secure Card Details Retrieval](#secure-card-details-retrieval)
 - [Card Limits](#card-limits)
-- [Card Withdrawal and Transfer](#card-withdrawal-and-transfer)
+- [Card Top-Up](#card-top-up)
 - [3DS Authentication](#3ds-authentication)
 - [Webhook Payloads](#webhook-payloads)
 - [Error Codes](#error-codes)
@@ -25,19 +24,15 @@ Complete API reference for all Wirex BaaS card management endpoints.
 
 ## Required Headers
 
-All card API endpoints require the following headers:
-
 | Header | Required | Description |
 |--------|----------|-------------|
-| `Authorization` | Yes | Bearer token for authentication |
-| `X-User-Address` | Yes | User's EOA (Externally Owned Account) address. Must be the EOA address, not the Smart Wallet address |
-| `X-Chain-Id` | Yes | Blockchain chain ID |
-
-**Example:**
+| `Authorization` | Yes | `Bearer {token}` (S2S token, or user-scoped token) |
+| `X-Chain-Id` | Yes | EIP-155 chain ID (`8453` Base, `84532` Base Sepolia) |
+| `X-User-Wallet` | With an S2S token | User's EOA address, not the Smart Wallet. Provide exactly one of `X-User-Wallet`, `X-User-Email`, `X-User-Id`. Not needed with a user-scoped token |
 
 ```
-Authorization: Bearer {user_token}
-X-User-Address: 0x1234...abcd
+Authorization: Bearer {token}
+X-User-Wallet: 0x1234...abcd
 X-Chain-Id: 8453
 ```
 
@@ -45,1379 +40,747 @@ X-Chain-Id: 8453
 
 ## Card Listing and Details
 
-### List All Cards
+### List Cards
 
 ```
 GET /api/v1/cards
-Authorization: Bearer {user_token}
-X-User-Address: {eoa_address}
-X-Chain-Id: {chain_id}
 ```
 
-**Query Parameters:**
+| Query | Type | Description |
+|-------|------|-------------|
+| `page_number` | integer | Page number |
+| `page_size` | integer | Page size (default 25) |
+| `sort` | string | `name` (ascending, default) or `usage` (descending usage) |
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `status` | string | No | Filter by status: `Active`, `Blocked`, `Closed`, `Requested`, `NotActivated` |
-| `card_type` | string | No | Filter by type: `Virtual`, `Plastic`, `Metal` |
-| `limit` | integer | No | Max results per page (default: 20, max: 100) |
-| `offset` | integer | No | Pagination offset (default: 0) |
+`GET /api/v3/cards` returns the same list across **every chain** the user holds a card on; `GET /api/v3/cards/{cardId}` reads one card the same way. Same query parameters and `CardResponse` shape plus `product`, `product_type` and `region`; `chain_id` names each entry's chain.
 
-**Response: `200 OK`**
+**Response `200`:**
 
 ```json
 {
-  "cards": [
+  "data": [
     {
-      "card_id": "card_virt_001",
-      "card_type": "Virtual",
+      "id": "64120850-73a1-4df5-a074-d463258c9deb",
+      "correlation_id": "64120850-73a1-4df5-a074-d463258c9deb",
+      "card_wallet_address": "0xAAFF0821A09A1Aac28B72dD3Ff410A7ea5FEb874",
       "status": "Active",
-      "currency": "USD",
-      "last_four": "4321",
-      "expiry_month": 12,
-      "expiry_year": 2028,
-      "created_at": "2025-03-15T10:00:00Z",
-      "limits": {
-        "daily": { "amount": 5000, "currency": "USD", "used": 250 },
-        "monthly": { "amount": 25000, "currency": "USD", "used": 1200 },
-        "lifetime": { "amount": -1, "currency": "USD", "used": 15000 }
-      }
-    },
-    {
-      "card_id": "card_phys_002",
-      "card_type": "Plastic",
-      "status": "NotActivated",
-      "currency": "USD",
-      "last_four": "8765",
-      "expiry_month": 6,
-      "expiry_year": 2029,
-      "created_at": "2025-03-10T14:00:00Z",
-      "delivery_method": "standard",
-      "estimated_delivery": "2025-03-24",
-      "limits": {
-        "daily": { "amount": 5000, "currency": "USD", "used": 0 },
-        "monthly": { "amount": 25000, "currency": "USD", "used": 0 },
-        "lifetime": { "amount": -1, "currency": "USD", "used": 0 }
-      }
+      "status_reason": "",
+      "previous_status": "NotActivated",
+      "generation": "Gen2",
+      "provider": "Wirex",
+      "chain_id": 8453,
+      "limit": {
+        "daily_limit": 10000.00,
+        "daily_limit_precise": "10000000000000000000000",
+        "daily_usage": 250.00,
+        "daily_usage_precise": "250000000000000000000",
+        "decimals": 18,
+        "currency": "USD"
+      },
+      "allowed_actions": [
+        { "type": "Block", "relative_path": "/api/v1/cards/:cardId/block" },
+        { "type": "Close", "relative_path": "/api/v1/cards/:cardId/close" },
+        { "type": "SetLimit", "relative_path": "/api/v1/cards/:cardId/limit" },
+        { "type": "GetDetails", "relative_path": "/api/v1/cards/:cardId/details" },
+        { "type": "GetCvv", "relative_path": "/api/v1/cards/:cardId/cvv" }
+      ],
+      "card_data": {
+        "card_name": "My Card",
+        "name_on_card": "Alex Grey",
+        "card_number_last_4": "0333",
+        "expiry_date": "12/2027",
+        "payment_system": "Visa",
+        "format": "Virtual"
+      },
+      "created_at": "2024-01-01T10:00:00Z",
+      "updated_at": "2024-01-01T10:05:00Z"
     }
-  ],
-  "total": 2,
-  "limit": 20,
-  "offset": 0
+  ]
 }
 ```
 
----
+| Field | Description |
+|-------|-------------|
+| `id` | Card ID (use as `{cardId}`) |
+| `correlation_id` | The id the issuance order returned; stays on the card after the issuer re-keys it |
+| `status` | `Requested`, `NotActivated`, `Active`, `Closed`, `Blocked` |
+| `generation` | `Gen1` or `Gen2` |
+| `provider` | `Wirex` (Visa rail) or `Bridge` |
+| `chain_id` | EIP-155 chain the card belongs to (Bridge: the funding wallet's chain) |
+| `funding_token`, `issuer_spender_address` | Present only for a card funded by its own wallet (Bridge rail) |
+| `balances[]` | Optional per-token balances (`token_address`, `token_symbol`, `balance`, `reference_balance`, `reference_currency`, `is_active`) |
+| `delivery_address` | Optional, for physical cards |
+| `limit.*_precise` | Base units as decimal string scaled by `limit.decimals` (18) |
+| `product`, `product_type` | v3 reads only. The card product and funding type; `product` is absent for a card issued on the issuer's defaults |
+| `region` | v3 reads only. The card's region as reported by the issuer, e.g. `GB` |
+| `card_data.format` | `Virtual`, `Plastic`, `Metal` |
+| `card_data.card_number_first_4` | Only while status is `Requested` or `NotActivated` |
+| `card_data.card_number_last_4`, `expiry_date` (`MM/YYYY`) | Only when status is not `Requested`/`NotActivated` |
+
+`allowed_actions[].type` values: `Activate`, `Block`, `Unblock`, `Close`, `SetLimit`, `GetDetails`, `GetCvv`, `GetPin`, `Reissue` (`relative_path` `/api/v3/cards/:cardId/reissue`), `SetActiveBalance`.
+> Note: docs differ. The guide table lists the first nine; `SetActiveBalance` appears only in the `GET /api/v1/cards` reference enum.
 
 ### Get Single Card
 
 ```
 GET /api/v1/cards/{cardId}
-Authorization: Bearer {user_token}
-X-User-Address: {eoa_address}
-X-Chain-Id: {chain_id}
 ```
 
-**Path Parameters:**
+Returns the same card object as one list item, including the `limit` object (see [Card Limits](#card-limits)). Note: the API reference page for this endpoint documents a response schema of `card_number` / `expiry_date`, which conflicts with the guides; the guides (and the card list) show the full card object, so use that shape.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `cardId` | string | Yes | Unique card identifier |
+---
 
-**Response: `200 OK`**
+## Card Order Fees and Delivery
+
+> Fee endpoints apply only if your account manager advised fee handling. If fees are not enforced, the fees and fee-invoice endpoints return `400 ErrorNotSupported` ("You have no card order/delivery fees to pay") with `error_details: [{"key":"field","details":"fees_enforced"},{"key":"issue","details":"not_supported"}]`; skip fee steps and issue the card directly.
+
+### Get Order Fees
+
+```
+GET /api/v1/cards/{type}/fees/{country}
+```
+
+`{type}`: `virtual`, `plastic`, `metal` (case-insensitive). `{country}`: ISO 3166-1 alpha-2.
 
 ```json
 {
-  "card_id": "card_virt_001",
-  "card_type": "Virtual",
-  "status": "Active",
   "currency": "USD",
-  "last_four": "4321",
-  "expiry_month": 12,
-  "expiry_year": 2028,
-  "cardholder_name": "JANE DOE",
-  "created_at": "2025-03-15T10:00:00Z",
-  "activated_at": "2025-03-15T10:00:00Z",
-  "limits": {
-    "daily": {
-      "amount": 5000,
-      "currency": "USD",
-      "used": 250,
-      "remaining": 4750,
-      "resets_at": "2025-03-16T00:00:00Z"
-    },
-    "monthly": {
-      "amount": 25000,
-      "currency": "USD",
-      "used": 1200,
-      "remaining": 23800,
-      "resets_at": "2025-04-01T00:00:00Z"
-    },
-    "lifetime": {
-      "amount": -1,
-      "currency": "USD",
-      "used": 15000,
-      "remaining": null
-    }
-  },
-  "recent_transactions": [
+  "order_fee": 9.99,
+  "estimated_payment_amounts": [
     {
-      "transaction_id": "txn_001",
-      "amount": "49.99",
-      "currency": "USD",
-      "merchant_name": "Example Store",
-      "stage": "Completed",
-      "direction": "debit",
-      "timestamp": "2025-03-14T16:30:00Z"
+      "amount": 10.05,
+      "precise_amount": "10050000",
+      "token_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "token_symbol": "USDC",
+      "rate": 0.9940
     }
   ]
 }
 ```
 
-**Error Responses:**
-
-| Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `404` | `ErrorNotFound` | Card with the specified ID does not exist |
-| `403` | `ErrorPermissionDenied` | Card does not belong to the authenticated user |
-
----
-
-## Card Issuance -- Virtual
-
-### Get Virtual Card Fees
-
-```
-GET /api/v1/cards/Virtual/fees/{country}
-Authorization: Bearer {user_token}
-X-User-Address: {eoa_address}
-X-Chain-Id: {chain_id}
-```
-
-> **Note:** This method is applicable only if your account manager has advised you to incorporate card fee handling.
-
-**Path Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `country` | string | Yes | ISO 3166-1 alpha-2 country code |
-
-**Response: `200 OK`**
-
-```json
-{
-  "card_type": "Virtual",
-  "country": "GB",
-  "currency": "USD",
-  "fee_amount": "1.00",
-  "fee_description": "Virtual card issuance fee",
-  "fee_breakdown": [
-    {
-      "type": "issuance",
-      "amount": "1.00",
-      "currency": "USD"
-    }
-  ]
-}
-```
-
----
-
-### Pay Virtual Card Fee (Create Invoice)
-
-```
-POST /api/v2/cards/Virtual/fees/{country}/payment
-Authorization: Bearer {user_token}
-X-User-Address: {eoa_address}
-X-Chain-Id: {chain_id}
-```
-
-> **Note:** This method is applicable only if your account manager has advised you to incorporate card fee handling.
-
-**Path Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `country` | string | Yes | ISO 3166-1 alpha-2 country code |
-
-**Request Body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `token_address` | string | Yes | Token contract address for fee payment |
-
-**Request Example:**
-
-```json
-{
-  "token_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-}
-```
-
-**Response: `201 Created`**
-
-```json
-{
-  "delivery_id": 12345,
-  "card_type": "Virtual",
-  "amount": "1.00",
-  "currency": "USD",
-  "status": "paid",
-  "created_at": "2025-03-15T09:55:00Z",
-  "expires_at": "2025-03-15T10:55:00Z"
-}
-```
-
-> **Note:** The `expires_at` indicates how long the invoice is valid for card issuance. Use the `delivery_id` in the card creation request before it expires.
-
----
-
-### Issue Virtual Card
-
-```
-POST /api/v2/cards/virtual
-Content-Type: application/json
-Authorization: Bearer {user_token}
-X-User-Address: {eoa_address}
-X-Chain-Id: {chain_id}
-```
-
-**Request Body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `currency` | string | Yes | Card currency (ISO 4217): `USD`, `EUR`, `GBP` |
-| `delivery_id` | integer | Yes | Delivery ID from the fee payment step |
-| `card_name` | string | No | Friendly name for the card (e.g., "My Shopping Card") |
-| `name_on_card` | string | No | Name printed on the card |
-
-**Request Example:**
-
-```json
-{
-  "currency": "USD",
-  "delivery_id": 12345,
-  "card_name": "My Virtual Card",
-  "name_on_card": "JANE DOE"
-}
-```
-
-**Response: `201 Created`**
-
-```json
-{
-  "card_id": "card_virt_001",
-  "card_type": "Virtual",
-  "status": "Active",
-  "currency": "USD",
-  "last_four": "4321",
-  "expiry_month": 12,
-  "expiry_year": 2028,
-  "cardholder_name": "JANE DOE",
-  "created_at": "2025-03-15T10:00:00Z",
-  "activated_at": "2025-03-15T10:00:00Z",
-  "limits": {
-    "daily": { "amount": 5000, "currency": "USD", "used": 0 },
-    "monthly": { "amount": 25000, "currency": "USD", "used": 0 },
-    "lifetime": { "amount": -1, "currency": "USD", "used": 0 }
-  }
-}
-```
-
-**Error Responses:**
-
-| Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `400` | `ErrorInvalidField` | Currency is not supported for virtual cards |
-| `400` | `ErrorInvalidField` | Delivery ID is invalid, expired, or already used |
-| `403` | `ErrorPermissionDenied` | `VisaVirtualCard` capability is not Active |
-| `409` | `ErrorNotSupported` | User has reached the maximum number of virtual cards |
-| `422` | `ErrorInvalidField` | User verification status is not Approved |
-
----
-
-## Card Issuance -- Physical
-
-### Get Physical Card Fees
-
-```
-GET /api/v1/cards/Plastic/fees/{country}
-Authorization: Bearer {user_token}
-```
-
-**Path Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `country` | string | Yes | ISO 3166-1 alpha-2 country code |
-
-**Response: `200 OK`**
-
-```json
-{
-  "card_type": "Plastic",
-  "country": "GB",
-  "currency": "USD",
-  "fee_amount": "10.00",
-  "fee_description": "Physical card issuance and standard delivery",
-  "fee_breakdown": [
-    {
-      "type": "issuance",
-      "amount": "5.00",
-      "currency": "USD"
-    },
-    {
-      "type": "delivery_standard",
-      "amount": "5.00",
-      "currency": "USD"
-    }
-  ]
-}
-```
-
----
-
-### Pay Physical Card Fee (Create Invoice)
-
-```
-POST /api/v2/cards/Plastic/fees/{country}/payment
-Authorization: Bearer {user_token}
-```
-
-**Path Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `country` | string | Yes | ISO 3166-1 alpha-2 country code |
-
-**Request Body (optional):**
-
-```json
-{
-  "delivery_method": "express"
-}
-```
-
-**Response: `201 Created`**
-
-```json
-{
-  "invoice_id": "inv_def456",
-  "card_type": "Plastic",
-  "amount": "20.00",
-  "currency": "USD",
-  "status": "paid",
-  "created_at": "2025-03-15T09:55:00Z",
-  "expires_at": "2025-03-15T10:55:00Z"
-}
-```
-
----
-
-### Issue Physical Card
-
-```
-POST /api/v2/cards/plastic
-Content-Type: application/json
-Authorization: Bearer {user_token}
-```
-
-**Request Body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `currency` | string | Yes | Card currency (ISO 4217) |
-| `invoice_id` | string | Yes | Invoice ID from fee payment |
-| `delivery_method` | string | Yes | `standard` or `express` |
-| `delivery_address` | object | Yes | Shipping address |
-| `delivery_address.line1` | string | Yes | Street address line 1 |
-| `delivery_address.line2` | string | No | Street address line 2 |
-| `delivery_address.city` | string | Yes | City |
-| `delivery_address.state` | string | No | State or province |
-| `delivery_address.post_code` | string | Yes | Postal / ZIP code |
-| `delivery_address.country` | string | Yes | ISO 3166-1 alpha-2 country code |
-
-**Request Example:**
-
-```json
-{
-  "currency": "USD",
-  "invoice_id": "inv_def456",
-  "delivery_method": "standard",
-  "delivery_address": {
-    "line1": "10 Downing Street",
-    "line2": "",
-    "city": "London",
-    "state": "England",
-    "post_code": "SW1A 2AA",
-    "country": "GB"
-  }
-}
-```
-
-**Response: `201 Created`**
-
-```json
-{
-  "card_id": "card_phys_002",
-  "card_type": "Plastic",
-  "status": "Requested",
-  "currency": "USD",
-  "last_four": "8765",
-  "expiry_month": 6,
-  "expiry_year": 2029,
-  "cardholder_name": "JANE DOE",
-  "delivery_method": "standard",
-  "estimated_delivery": "2025-03-29",
-  "delivery_address": {
-    "line1": "10 Downing Street",
-    "line2": "",
-    "city": "London",
-    "state": "England",
-    "post_code": "SW1A 2AA",
-    "country": "GB"
-  },
-  "created_at": "2025-03-15T10:00:00Z"
-}
-```
-
-**Error Responses:**
-
-| Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `400` | `ErrorInvalidField` | Currency is not supported for physical cards |
-| `400` | `ErrorInvalidField` | Invoice ID is invalid, expired, or already used |
-| `400` | `ErrorInvalidField` | One or more address fields are invalid |
-| `400` | `ErrorInvalidField` | Delivery method is not available for this country |
-| `403` | `ErrorPermissionDenied` | `VisaPlasticCard` capability is not Active |
-| `409` | `ErrorNotSupported` | User has reached the maximum number of physical cards |
-| `422` | `ErrorInvalidField` | Delivery is not available to this country |
-| `422` | `ErrorInvalidField` | User verification status is not Approved |
-
----
-
-## Delivery Options
-
-### Get Delivery Countries
+### Delivery Countries
 
 ```
 GET /api/v1/cards/delivery/countries
-Authorization: Bearer {user_token}
 ```
 
-**Response: `200 OK`**
+Response: array of country codes, e.g. `["GB", "DE", "FR"]`.
 
-```json
-{
-  "countries": [
-    {
-      "country_code": "GB",
-      "country_name": "United Kingdom",
-      "methods_available": ["standard", "express"]
-    },
-    {
-      "country_code": "DE",
-      "country_name": "Germany",
-      "methods_available": ["standard"]
-    },
-    {
-      "country_code": "US",
-      "country_name": "United States",
-      "methods_available": ["standard", "express"]
-    }
-  ]
-}
-```
-
----
-
-### Get Delivery Methods for Country
+### Delivery Methods
 
 ```
 GET /api/v1/cards/delivery/methods/{country}
-Authorization: Bearer {user_token}
 ```
 
-**Path Parameters:**
+```json
+[
+  {
+    "fee": 15.00,
+    "currency": "USD",
+    "provider": "DHL",
+    "estimated_payment_amounts": [
+      { "amount": 15.10, "precise_amount": "15100000", "token_address": "0xA0b8...", "token_symbol": "USDC", "rate": 0.9934 }
+    ]
+  }
+]
+```
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `country` | string | Yes | ISO 3166-1 alpha-2 country code |
+Pass the selected `provider` as `delivery_provider` when creating the invoice and issuing a physical card.
 
-**Response: `200 OK`**
+### Card Order Configuration (v3)
+
+```
+GET /api/v3/cards/config
+```
 
 ```json
 {
-  "country": "GB",
-  "methods": [
+  "formats": [
     {
-      "method": "standard",
-      "estimated_days": "7-14",
-      "fee": "0.00",
-      "fee_currency": "USD",
-      "tracking_available": false
-    },
-    {
-      "method": "express",
-      "estimated_days": "2-5",
-      "fee": "15.00",
-      "fee_currency": "USD",
-      "tracking_available": true
+      "format": "Virtual",
+      "products": [
+        { "product": "Standard", "product_type": "Debit", "provider": "Wirex", "payment_system": "Visa", "designs": ["WirexBlack", "WirexBlue"], "card_programs": ["WIREX_ATM_EU"], "countries": ["GB", "DE", "FR"] }
+      ]
     }
   ]
 }
 ```
 
-**Error Responses:**
+`format`: `Virtual`, `Plastic`, `Metal`. `products[].product` is the name sent as `product` on a v3 order; `product_type` is `Debit` or `Credit`; `provider` e.g. `Wirex`. A company with nothing configured receives empty collections, not an error. Filter by the user's residence country; one product name can appear more than once.
 
-| Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `404` | `ErrorNotFound` | Country code is not recognized |
-| `422` | `ErrorNotSupported` | Card delivery is not available to this country |
+---
+
+## Card Issuance
+
+All issue endpoints return `200` with `{ "id": "<card id>" }`; the card starts `Requested` and moves to `NotActivated` once processed. Check capabilities first: `GET /api/v2/user` -> `capabilities[]` (`VisaVirtualCard`, `VisaPlasticCard`, `VisaMetalCard`, `BridgeVirtualCard`, `BridgePlasticCard`; status `Active`, `ActivationNotStarted`, `InProgress`, `NotFulfilled`, `NotRequired`, `NotAvailable`; the guide lists only `Active`, `NotFulfilled`, `NotAvailable`).
+
+### v1 -- External Fee
+
+1. Invoice: `POST /api/v1/cards/{type}/fees/{country}/payment` with `{ "token_address": "0x...", "delivery_provider": "DHL" }` (`delivery_provider` required for physical). Response: `recipient_address` and `payment_amount` (`amount`, `precise_amount`, `token_address`, `token_symbol`, `rate`); **no** `delivery_id`.
+2. Pay `payment_amount.precise_amount` of `payment_amount.token_address` to `recipient_address` on-chain; keep the tx hash.
+3. Issue: `POST /api/v1/cards/virtual`, `/api/v1/cards/plastic`, `/api/v1/cards/metal`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `payment_transaction_hash` | string | When fees enforced | Hash of the fee transfer |
+| `delivery_address` | object | Physical only | See [Address Fields](#address-fields) |
+| `delivery_provider` | string | No | Courier provider |
+| `card_name` | string | No | Display name (1-50 chars) |
+| `name_on_card` | string | No | Accepted and ignored: the card carries the user's KYC name. Use v3 to print a different name |
+
+### v2 -- Direct Fee
+
+1. Invoice: `POST /api/v2/cards/{type}/fees/{country}/payment` (same body). Response: `delivery_id` (integer), `recipient_address`, `payment_amount`.
+2. Issue: `POST /api/v2/cards/virtual`, `/api/v2/cards/plastic`, `/api/v2/cards/metal`. Wirex debits the fee automatically (cardholder's on-chain balance; under External Authorization, your Master Account).
+
+```json
+{
+  "delivery_id": 12345,
+  "delivery_provider": "DHL",
+  "name_on_card": "Alex Grey",
+  "delivery_address": { "line1": "10 Downing Street", "city": "London", "zip_code": "SW1A 2AA", "country": "GB" }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `delivery_id` | integer | When fees enforced | From the invoice. Missing or `0` returns `400 "Delivery ID is required and must be positive"`. There is no `invoice_id` field |
+| `delivery_address` | object | Physical only | Omit for virtual |
+| `delivery_provider` | string | No | Courier provider |
+| `card_name` | string | No | 1-50 chars |
+| `name_on_card` | string | No | Accepted and ignored: the card carries the user's KYC name. Use v3 to print a different name |
+
+### v3 -- Bridge Rail and Configurable Issuance
+
+Fee invoice is the v2 call (no v3 invoice endpoint). Issue on a per-format path (no `{type}`): `POST /api/v3/cards/virtual`, `/api/v3/cards/plastic`, `/api/v3/cards/metal`. On-chain integrations only (not External Authorization).
+
+All v2 fields plus the product fields below; `delivery_id` is required only when this order is priced above zero, and `name_on_card` is printed uppercased:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `product` | string | Conditional | A product from `GET /api/v3/cards/config` |
+| `product_type` | string | Conditional | `Debit` or `Credit`, the product's `product_type` |
+| `payment_system` | string | Conditional | `Visa` or `MasterCard`, the product's `payment_system` |
+| `design` | string | Conditional | One of the product's `designs` |
+| `card_program` | string | Conditional | One of the product's `card_programs` (carries cash-withdrawal terms) |
+| `card_wallet_address` | string | Conditional | Required when the order resolves to Bridge, rejected when it resolves to Visa, always rejected for metal |
+
+**Product selection is all or none.** Send all five of `product`, `product_type`, `payment_system`, `design` and `card_program` from one product entry, or none of them for the issuer's defaults. Naming only some returns `400 ErrorMissingField` (one `error_details` entry per missing field); a combination the issuer does not offer returns `400 "Request failed due to external validation failure"`; a priced order without the fee invoice's `delivery_id` returns `400 ErrorGeneral` ("This card order is priced above zero and must carry the delivery returned by the fees invoice endpoint"). Per the API reference, with provider Bridge `product`, `product_type` and `card_program` are rejected and `design` / `payment_system` are optional.
+
+Rail resolution: Visa is tried first (`VisaVirtualCard`/`VisaPlasticCard` `Active`); the order resolves to Bridge only if the Bridge capability is `Active` and Visa is not. Sending `card_wallet_address` does not request Bridge.
+
+| | Visa rail | Bridge rail |
+|---|---|---|
+| `card_wallet_address` | Omit | Required: a confirmed on-chain wallet of type `Card` |
+| Funded from | Cardholder's primary wallet on the request chain | The named card wallet on its own chain |
+| Card `chain_id` | Session `X-Chain-Id` | The card wallet's chain |
+
+Bridge funding-wallet errors (`400`, `card_wallet_address` in `error_details`): `ErrorMissingField` (omitted on Bridge), `ErrorInvalidField` (not a non-zero address, or sent on a Visa order), `ErrorGeneral` (sent on metal), `ErrorNotFound` (not a `Card` wallet you hold), `ErrorNotSupported` (implementation rejected on-chain), `ErrorNotYetValid` (not yet confirmed on-chain; wait for the wallet registration webhook `Confirmed`).
+
+### Address Fields
+
+| Field | Required | Validation |
+|-------|----------|------------|
+| `line1` | Yes | `^[A-Za-z0-9&.,'’\-/() :+#]{2,100}$` |
+| `line2` | No | same as `line1` |
+| `city` | Yes | `^[A-Za-z\s\-'.]{2,100}$` (no digits) |
+| `state` | No | `^[A-Za-z][A-Za-z\s\-']{1,99}$` |
+| `zip_code` | Yes | `^[A-Za-z0-9\s\-]{3,12}$` -- always required; use a placeholder such as `"00000"` where the country has no postal code |
+| `country` | Yes | `^[A-Z]{2}$` |
+
+A missing field returns `400 ErrorMissingField`, a bad format `400 ErrorInvalidField` (field named in `error_details`, e.g. `delivery_address.zip_code`). If platform checks pass but the card processor rejects the order, the call returns `400 "Request failed due to external validation failure"`, no card is created and no webhook is sent.
 
 ---
 
 ## Card Lifecycle Management
 
+```
+Requested -> NotActivated -> Active <-> Blocked -> Closed
+```
+
+| Action | Allowed in | Refused in, with |
+|--------|-----------|------------------|
+| Activate | `NotActivated` | `Requested`: `Card is not issued yet`; otherwise `Card is already activated` |
+| Block | `Active` | `Requested`/`NotActivated`/`Closed`: `Card is not active`; `Blocked`: `Card is already blocked` |
+| Unblock | `Blocked` | otherwise `Card is not blocked` |
+| Close | `Active`, `Blocked` | `Requested`/`NotActivated`: `Card status does not allow closing`; `Closed`: `Card is already closed` |
+| Change limit | `Active` | `Card status does not allow limit changes` |
+| Get details, CVV, PIN | `Active` | `Card is not active` |
+| Reissue | `NotActivated`, `Active`, `Blocked` (by the user), once the card is old enough | See [Reissue a Card](#reissue-a-card) |
+| Change name | any status | -- |
+
+Refusals are `400 ErrorInvalidStatus` and name the action in `error_details`.
+
 ### Activate Card (Physical Only)
 
 ```
 PUT /api/v1/cards/{cardId}/activate
-Content-Type: application/json
-Authorization: Bearer {user_token}
 ```
 
-**Request Body:**
+```json
+{ "card_number_last4": "1234", "expiry_date": "12/2027" }
+```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `last_four` | string | Yes | Last four digits of the card number (printed on the physical card) |
+| `card_number_last4` | string | Yes | Last 4 digits of the card number |
+| `expiry_date` | string | Yes | `MM/YYYY` |
 
-**Request Example:**
+Response `200`, empty.
 
-```json
-{
-  "last_four": "8765"
-}
-```
-
-**Response: `200 OK`**
-
-```json
-{
-  "card_id": "card_phys_002",
-  "status": "Active",
-  "activated_at": "2025-03-25T14:00:00Z"
-}
-```
-
-**Error Responses:**
-
-| Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `400` | `ErrorInvalidField` | Last four digits do not match the card |
-| `400` | `ErrorInvalidStatus` | Card is already activated |
-| `400` | `ErrorNotSupported` | Virtual cards are auto-activated; this endpoint is for physical cards only |
-| `404` | `ErrorNotFound` | Card not found |
-| `400` | `ErrorInvalidStatus` | Card status is still `Requested` (not yet delivered) |
-
----
-
-### Block Card
+### Block / Unblock / Close
 
 ```
 PUT /api/v1/cards/{cardId}/block
-Authorization: Bearer {user_token}
-```
-
-**Request Body (optional):**
-
-```json
-{
-  "reason": "lost"
-}
-```
-
-| Reason | Description |
-|--------|-------------|
-| `lost` | Card is lost |
-| `stolen` | Card is stolen |
-| `suspicious_activity` | Suspected fraudulent activity |
-| `user_request` | General user request (default) |
-
-**Response: `200 OK`**
-
-```json
-{
-  "card_id": "card_virt_001",
-  "status": "Blocked",
-  "blocked_at": "2025-03-15T12:00:00Z",
-  "reason": "lost"
-}
-```
-
-**Error Responses:**
-
-| Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `400` | `ErrorInvalidStatus` | Card is already blocked |
-| `400` | `ErrorInvalidStatus` | Cannot block a closed card |
-| `404` | `ErrorNotFound` | Card not found |
-
----
-
-### Unblock Card
-
-```
 PUT /api/v1/cards/{cardId}/unblock
-Authorization: Bearer {user_token}
-```
-
-**Response: `200 OK`**
-
-```json
-{
-  "card_id": "card_virt_001",
-  "status": "Active",
-  "unblocked_at": "2025-03-15T13:00:00Z"
-}
-```
-
-**Error Responses:**
-
-| Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `400` | `ErrorInvalidStatus` | Card is not in Blocked status |
-| `400` | `ErrorInvalidStatus` | Cannot unblock a closed card |
-| `403` | `ErrorPermissionDenied` | Card was blocked for `stolen`; cannot be unblocked (must be closed) |
-| `404` | `ErrorNotFound` | Card not found |
-
----
-
-### Close Card
-
-```
 PUT /api/v1/cards/{cardId}/close
-Authorization: Bearer {user_token}
 ```
 
-**Request Body (optional):**
+No request body; response `200 {}`. Closing is irreversible.
+
+### Change Card Name
+
+```
+PUT /api/v1/cards/{cardId}/name
+```
+
+```json
+{ "name": "For unsafe sites" }
+```
+
+`name` must match `^[a-zA-Z0-9\-':+# @]{1,50}$`. Response `200 {}`. Changes only `card_data.card_name`; `name_on_card` is embossed at issuance and cannot be changed.
+
+### Reissue a Card
+
+> The guide marks reissue as **in active testing**: its request, response and behavior may change before it is final.
+
+Replaces a lost, stolen, damaged or expiring card with a new card (own `id`) on the same format, rail, funding wallet, chain and payment system. v3 only; works for any card whose `allowed_actions` lists `Reissue`, whichever version issued it. If the reissue is priced for the user, first create the v2 fee invoice for the card's format (`POST /api/v2/cards/{type}/fees/{country}/payment`) and keep its `delivery_id`; if the fee lookup answers "You have no card order/delivery fees to pay", skip it.
+
+```
+POST /api/v3/cards/{cardId}/reissue
+```
 
 ```json
 {
-  "reason": "no_longer_needed"
+  "reason": "Damaged",
+  "delivery_id": 12345,
+  "delivery_provider": "DHL",
+  "delivery_address": { "line1": "10 Downing Street", "city": "London", "zip_code": "SW1A 2AA", "country": "GB" }
 }
 ```
 
-**Response: `200 OK`**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `reason` | string | Yes | `Expiration`, `Damaged`, `LostOrStolen` or `UpdateProduct` (move to a different `card_program`) |
+| `delivery_address` | object | Conditional | Required for plastic/metal, refused for virtual |
+| `delivery_provider` | string | Conditional | Plastic/metal only. Required when fees are enforced for your company, otherwise defaults to `DHL` |
+| `delivery_id` | integer | No | From the fee invoice, for a priced reissue. The API does not refuse a reissue without it |
+| `card_program` | string | No | From `GET /api/v3/cards/config`; omitted, the old card's program is kept |
 
-```json
-{
-  "card_id": "card_virt_001",
-  "status": "Closed",
-  "closed_at": "2025-03-15T14:00:00Z",
-  "reason": "no_longer_needed"
-}
-```
+Response `200`: `{ "id": "<replacement card id>" }`. A virtual replacement is `Active` immediately; a plastic/metal replacement is `NotActivated` and ships to `delivery_address`.
 
-> **Warning:** Closing a card is **irreversible**. The card cannot be reactivated. Any pending transactions will be declined.
+Eligibility: status `NotActivated`, `Active`, or `Blocked` by the user (a card blocked by Wirex cannot be reissued, contact Wirex support); card age at least 6 months, 6 minutes in sandbox.
 
-**Error Responses:**
+| Old card | Becomes `Closed` |
+|----------|------------------|
+| Virtual, any reason | When the replacement is issued |
+| Plastic or metal, `Damaged` | When the user activates the replacement |
+| Plastic or metal, `LostOrStolen` | **Not automatically**: block it first with `PUT /api/v1/cards/{cardId}/block` (a card the user blocked can still be reissued) |
 
-| Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `400` | `ErrorInvalidStatus` | Card is already closed |
-| `400` | `ErrorNotSupported` | Card has pending transactions; wait for settlement or force-close |
-| `404` | `ErrorNotFound` | Card not found |
+Card status webhooks arrive for the replacement and, when it closes, for the old card; nothing in the payload links the two, keep the mapping from the reissue response.
+
+Errors (all `400`, `CategoryValidationFailure`): `ErrorMissingField` / `ErrorGeneral` for `reason` (missing, or not one of the four); `ErrorNotYetValid` "Card can be reissued 6 months after it was created" with `reissuable_from`; `ErrorInvalidStatus` "Card status does not allow reissue" (`Requested`, `Closed`) or "Card status was set by system, contact support to reissue"; `ErrorMissingField` `delivery_address` (physical card) or `delivery_provider` (fees enforced); `ErrorGeneral` `delivery_address` on a virtual card; `ErrorNotFound` "Card not found"; `ErrorGeneral` "Request failed due to external validation failure" (issuer refused, e.g. unknown `card_program`).
 
 ---
 
 ## Verification and Confirmation
 
-Before retrieving sensitive card details (PAN, CVV, PIN), a verification step is required to generate an `action_token`.
+Before retrieving PAN, CVV or PIN, obtain an `action_token`.
 
 ### Signature Verification
 
 ```
 POST /api/v1/confirmation/signature/verify
-Content-Type: application/json
-Authorization: Bearer {user_token}
-X-User-Address: {eoa_address}
-X-Chain-Id: {chain_id}
 ```
 
-**Request Body:**
+Message to sign: `By signing this I confirm that I am executing action {ActionType} at {Nonce}`
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `action_type` | string | Yes | Enum: `GetCardDetails`, `3dsChallenge`, `VerifyPhone` |
-| `message_signature` | string | Yes | EIP-191 or EIP-712 signed message from the user's EOA |
-| `nonce` | number | Yes | Unix timestamp (seconds) |
-
-**Request Example:**
-
-```json
-{
-  "action_type": "GetCardDetails",
-  "message_signature": "0x1234abcd...signed_message_hex",
-  "nonce": 1710496200
-}
-```
-
-**Response: `200 OK`**
+| `action_type` | string | Yes | `GetCardDetails`, `3dsChallenge`, `VerifyPhone` |
+| `message_signature` | string | Yes | Signature of the message by the user's wallet |
+| `nonce` | integer | Yes | Unix timestamp (seconds) when signed; valid 5 minutes |
+| `public_key` | string | XRPL only | Hex public key of the signer; ignored on EVM and Stellar |
 
 ```json
-{
-  "token": "action-token-string"
-}
+{ "action_type": "GetCardDetails", "message_signature": "0x1234abcd...", "nonce": 1710496200 }
 ```
 
-> **Note:** The `token` (action_token) expires in **5 minutes** and is single-use per detail type.
+Response `200`: `{ "action_token": "eyJhbGciOi..." }` (a signed JWT). The older `POST /api/v1/confirmation/signature` is obsolete.
 
-**Error Responses:**
-
-| Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `400` | `ErrorInvalidField` | Signature does not match the user's registered EOA |
-| `400` | `ErrorInvalidField` | Invalid action_type or nonce |
-| `401` | `ErrorPermissionDenied` | Invalid or expired user token |
-
----
+Errors: `ErrorMissingField` (`action_type`, `message_signature`, `nonce`), `ErrorInvalidField` (`action_type: invalid_value`, `nonce: expired`, `signature: invalid_signature`).
 
 ### Request SMS OTP
 
 ```
 POST /api/v1/confirmation/sms
-Content-Type: application/json
-Authorization: Bearer {user_token}
-X-User-Address: {eoa_address}
-X-Chain-Id: {chain_id}
 ```
 
-**Request Body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `action_type` | string | Yes | Enum: `GetCardDetails`, `3dsChallenge`, `VerifyPhone` |
-
-**Request Example:**
+Body: `{ "action_type": "GetCardDetails" }` (`GetCardDetails`, `3dsChallenge`, `VerifyPhone`). Sends the code to the phone provided during KYC.
 
 ```json
 {
-  "action_type": "GetCardDetails"
-}
-```
-
-**Response: `200 OK`**
-
-```json
-{
-  "session_id": "uuid-session-id",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "attempts_left": 3,
+  "expires_at": "2024-01-15T10:05:00Z",
   "code_length": 6,
-  "expires_at": "2025-03-15T10:05:00Z"
+  "resend_at": "2024-01-15T10:01:00Z"
 }
 ```
-
-**Error Responses:**
-
-| Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `400` | `ErrorInvalidField` | User's phone number is not confirmed |
-| `400` | `ErrorInvalidField` | Invalid action_type value |
-| `429` | `ErrorInvalidField` | Too many SMS requests; retry after cooldown |
-
----
 
 ### Verify SMS OTP
 
 ```
 POST /api/v1/confirmation/sms/verify
-Content-Type: application/json
-Authorization: Bearer {user_token}
-X-User-Address: {eoa_address}
-X-Chain-Id: {chain_id}
 ```
 
-**Request Body:**
+Body: `{ "session_id": "...", "code": "123456" }`. Response `200`: `{ "token": "..." }` -- note the field is `token` here (signature verify returns `action_token`); pass it as `action_token` below.
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `session_id` | string | Yes | Session ID returned from the SMS request |
-| `code` | string | Yes | 6-digit SMS verification code |
-
-**Request Example:**
-
-```json
-{
-  "session_id": "uuid-session-id",
-  "code": "123456"
-}
-```
-
-**Response: `200 OK`**
-
-```json
-{
-  "token": "action-token-string"
-}
-```
-
-**Error Responses:**
-
-| Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `400` | `ErrorInvalidField` | Verification code is incorrect |
-| `400` | `ErrorInvalidField` | Session ID is not recognized |
-| `410` | `ErrorExpired` | Verification code has expired (5-minute validity) |
-| `429` | `ErrorInvalidField` | Too many failed attempts; request a new code |
+Errors: `ErrorMissingField` (`code`, `session_id`), `ErrorInvalidField` (`session_id: invalid_uuid`).
 
 ---
 
 ## Secure Card Details Retrieval
 
-All card detail endpoints require a valid `action_token` from the verification step. The token expires after **5 minutes** and is single-use per detail type.
+All three endpoints take `{ "action_token": "..." }` in the body and require the card to be `Active`. Token: valid 5 minutes, reusable across PAN, CVV and PIN (the same token works for all three); mint a fresh one each time the user opens the card details view.
 
-### Get PAN (Full Card Number)
+> Call these directly from the client app; proxying cardholder data through your backend is permitted only if the backend is PCI DSS compliant. Recommended: the PCI Compliant SDK (skill `wirex-baas-pci-sdk`) reveals the values inside Wirex-controlled views so they never reach your app: Web `@wirexapp/card-reveal-web` (docs `retail-pci-sdk-web-reveal`), React Native `@wirexapp/mobile-sdk`, Flutter `wirex_mobile_sdk`, iOS `WirexMobileSDK`, Android `com.wirexapp.baas:mobile-sdk`. You still mint the `action_token` and pass it to the SDK.
+
+### Get PAN and Expiry
 
 ```
 POST /api/v1/cards/{cardId}/details
-Content-Type: application/json
-Authorization: Bearer {user_token}
 ```
 
-**Request Body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `action_token` | string | Yes | Token from signature or SMS verification |
-
-**Request Example:**
-
-```json
-{
-  "action_token": "act_token_abc123"
-}
-```
-
-**Response: `200 OK`**
-
-```json
-{
-  "pan": "4111111111114321",
-  "expiry_month": 12,
-  "expiry_year": 2028,
-  "cardholder_name": "JANE DOE"
-}
-```
-
-**Error Responses:**
-
-| Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `400` | `ErrorInvalidField` | Action token is invalid |
-| `401` | `ErrorExpired` | Action token has expired (5-minute window) |
-| `403` | `ErrorPermissionDenied` | Card must be in Active status to retrieve details |
-| `404` | `ErrorNotFound` | Card not found |
-
----
+Response: `{ "card_number": "4111111111111234", "expiry_date": "12/2027" }`
 
 ### Get CVV
 
 ```
 POST /api/v1/cards/{cardId}/cvv
-Content-Type: application/json
-Authorization: Bearer {user_token}
 ```
 
-**Request Body:**
-
-```json
-{
-  "action_token": "act_token_abc123"
-}
-```
-
-**Response: `200 OK`**
-
-```json
-{
-  "cvv": "123"
-}
-```
-
-**Error Responses:** Same as PAN retrieval.
-
----
+Response: `{ "cvv": "123" }`
 
 ### Get PIN
 
 ```
 POST /api/v1/cards/{cardId}/pin
-Content-Type: application/json
-Authorization: Bearer {user_token}
 ```
 
-**Request Body:**
+Response: `{ "pin": "1234" }`. Physical cards only (`ErrorNotSupported`, `card_format: not_physical` otherwise).
 
-```json
-{
-  "action_token": "act_token_abc123"
-}
-```
+### Action Token Errors
 
-**Response: `200 OK`**
+| Error Reason | Error Details | Description |
+|--------------|---------------|-------------|
+| `ErrorInvalidField` | `action_token: invalid_token` | Malformed token |
+| `ErrorInvalidField` | `action_token: invalid_claims` | Claims cannot be parsed |
+| `ErrorExpired` | `action_token: expired` | Older than 5 minutes |
+| `ErrorInvalidField` | `action_token: invalid_purpose` | Issued for a different action type |
+| `ErrorMissingField` | `action_token: missing` | Not provided |
+| `ErrorInvalidStatus` | `card_status: not_active` | Card is not `Active` |
+| `ErrorUpstreamRejected` | `AuthTokenIsInvalid` | The action token was not issued to this user; mint a new one |
 
-```json
-{
-  "pin": "1234"
-}
-```
-
-**Error Responses:** Same as PAN retrieval.
-
----
-
-### Complete Card Details Retrieval Example
+### Example: Retrieve Details with a Wallet Signature
 
 ```javascript
-const axios = require('axios');
-
 const API_BASE = 'https://api-baas.wirexapp.com';
 
-async function getCardDetailsWithSignature(userToken, cardId, eoa, chainId, messageSignature, nonce) {
+async function getCardDetails(accessToken, cardId, eoa, chainId, wallet) {
   const headers = {
-    Authorization: `Bearer ${userToken}`,
-    'X-User-Address': eoa,
-    'X-Chain-Id': chainId.toString(),
+    Authorization: `Bearer ${accessToken}`,
+    'X-User-Wallet': eoa,
+    'X-Chain-Id': String(chainId),
+    'Content-Type': 'application/json',
   };
 
-  // Step 1: Verify signature to get action_token
-  const verifyResponse = await axios.post(
-    `${API_BASE}/api/v1/confirmation/signature/verify`,
-    { action_type: 'GetCardDetails', message_signature: messageSignature, nonce },
-    { headers }
-  );
+  const nonce = Math.floor(Date.now() / 1000);
+  const message = `By signing this I confirm that I am executing action GetCardDetails at ${nonce}`;
+  const message_signature = await wallet.signMessage(message);
 
-  const actionToken = verifyResponse.data.token;
+  const verify = await fetch(`${API_BASE}/api/v1/confirmation/signature/verify`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action_type: 'GetCardDetails', message_signature, nonce }),
+  });
+  const { action_token } = await verify.json();
 
-  // Step 2: Retrieve PAN
-  const panResponse = await axios.post(
-    `${API_BASE}/api/v1/cards/${cardId}/details`,
-    { action_token: actionToken },
-    { headers }
-  );
-
-  // Step 3: Retrieve CVV (need a new action_token — single-use per detail type)
-  const cvvResponse = await axios.post(
-    `${API_BASE}/api/v1/cards/${cardId}/cvv`,
-    { action_token: actionToken },
-    { headers }
-  );
-
-  // Step 4: Retrieve PIN (physical cards only)
-  const pinResponse = await axios.post(
-    `${API_BASE}/api/v1/cards/${cardId}/pin`,
-    { action_token: actionToken },
-    { headers }
-  );
-
-  return {
-    pan: panResponse.data.pan,
-    expiry_month: panResponse.data.expiry_month,
-    expiry_year: panResponse.data.expiry_year,
-    cardholder_name: panResponse.data.cardholder_name,
-    cvv: cvvResponse.data.cvv,
-    pin: pinResponse.data.pin,
-  };
-}
-
-async function getCardDetailsWithSms(userToken, cardId, eoa, chainId) {
-  const headers = {
-    Authorization: `Bearer ${userToken}`,
-    'X-User-Address': eoa,
-    'X-Chain-Id': chainId.toString(),
+  const post = async (path) => {
+    const res = await fetch(`${API_BASE}/api/v1/cards/${cardId}/${path}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ action_token }),
+    });
+    return res.json();
   };
 
-  // Step 1: Request SMS OTP
-  const smsResponse = await axios.post(
-    `${API_BASE}/api/v1/confirmation/sms`,
-    { action_type: 'GetCardDetails' },
-    { headers }
-  );
-
-  const { session_id } = smsResponse.data;
-
-  // Step 2: Wait for user to enter SMS code (from UI)
-  const smsCode = await promptUserForSmsCode(); // your UI implementation
-
-  // Step 3: Verify SMS code
-  const verifyResponse = await axios.post(
-    `${API_BASE}/api/v1/confirmation/sms/verify`,
-    { session_id, code: smsCode },
-    { headers }
-  );
-
-  const actionToken = verifyResponse.data.token;
-
-  // Step 4: Retrieve details (same as signature flow)
-  const panResponse = await axios.post(
-    `${API_BASE}/api/v1/cards/${cardId}/details`,
-    { action_token: actionToken },
-    { headers }
-  );
-
-  return panResponse.data;
+  const { card_number, expiry_date } = await post('details');
+  const { cvv } = await post('cvv');
+  return { card_number, expiry_date, cvv };
 }
 ```
+
+SMS variant: `POST /api/v1/confirmation/sms` -> collect the code from the user -> `POST /api/v1/confirmation/sms/verify` -> use the returned `token` as `action_token`.
 
 ---
 
 ## Card Limits
 
-### Update Card Limits
+Four limits: daily, monthly, per-transaction (settable) and lifetime (read-only). A positive number is a hard cap, `-1` means no limit, `0` blocks all spending. Resets are at fixed UTC boundaries: daily at 00:00 UTC, monthly at 00:00 UTC on the 1st; lifetime never resets; per-transaction has no usage counter. A new card starts with all limits at `-1`.
+
+### Get Current Limits
+
+```
+GET /api/v1/cards/{cardId}
+```
+
+```json
+{
+  "limit": {
+    "daily_limit": 1000.00,
+    "daily_usage": 250.00,
+    "monthly_limit": -1,
+    "monthly_usage": 500.00,
+    "lifetime_limit": -1,
+    "lifetime_usage": 1500.00,
+    "currency": "EUR"
+  }
+}
+```
+
+`transaction_limit` is not in this response; it is in the `card-limits` webhook.
+
+### Set Limits
 
 ```
 PUT /api/v1/cards/{cardId}/limit
-Content-Type: application/json
-Authorization: Bearer {user_token}
 ```
 
-**Request Body:**
+```json
+{ "daily_limit": 1000.00, "monthly_limit": 20000.00, "transaction_limit": 500.00 }
+```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `daily` | number | No | Daily spending limit in card currency. `-1` = no limit, `0` = fully restricted |
-| `monthly` | number | No | Monthly spending limit. `-1` = no limit, `0` = fully restricted |
-| `lifetime` | number | No | Lifetime spending limit. `-1` = no limit, `0` = fully restricted |
+| `daily_limit` | number | No | Per calendar day; `-1` disables |
+| `monthly_limit` | number | No | Per calendar month; `-1` disables |
+| `transaction_limit` | number | No | Per single transaction; `-1` disables |
+| `limit` | number | No | Obsolete alias of `daily_limit` |
 
-**Request Example:**
+Send only the fields to change (omitted keep their value). `lifetime_limit` is accepted (`200`) but ignored. Response: `200`, empty. To remove one limit: `{ "daily_limit": -1 }`.
 
-```json
-{
-  "daily": 10000,
-  "monthly": 50000,
-  "lifetime": -1
-}
-```
+Errors: `ErrorInvalidStatus` (`card_status: not_active`), `ErrorNotFound` (card not found or not owned), `ErrorInvalidField` (`card_id: invalid_uuid`), `ErrorMissingField` (`card_id`).
 
-**Response: `200 OK`**
+### Limit Webhook
+
+`POST {your_webhook_base_url}/v2/webhooks/card-limits`
 
 ```json
 {
-  "card_id": "card_virt_001",
-  "limits": {
-    "daily": {
-      "amount": 10000,
-      "currency": "USD",
-      "used": 250,
-      "remaining": 9750,
-      "resets_at": "2025-03-16T00:00:00Z"
-    },
-    "monthly": {
-      "amount": 50000,
-      "currency": "USD",
-      "used": 1200,
-      "remaining": 48800,
-      "resets_at": "2025-04-01T00:00:00Z"
-    },
-    "lifetime": {
-      "amount": -1,
-      "currency": "USD",
-      "used": 15000,
-      "remaining": null
-    }
-  },
-  "updated_at": "2025-03-15T11:00:00Z"
+  "card_id": "64120850-73a1-4df5-a074-d463258c9deb",
+  "transaction_limit": -1,
+  "daily_limit": 1000.00,
+  "daily_usage": 250.00,
+  "monthly_limit": -1,
+  "monthly_usage": 500.00,
+  "lifetime_limit": -1,
+  "lifetime_usage": 1500.00
 }
 ```
 
-**Limit Value Reference:**
+### Limit Increase for Customers
 
-| Value | Meaning | Example |
-|-------|---------|---------|
-| `5000` | $5,000 limit | Standard daily limit |
-| `0` | Fully restricted | No transactions allowed |
-| `-1` | Unlimited | No cap on spending |
+Standard limits: 30,000 EUR per transaction and 30,000 EUR monthly. Higher limits require valid KYC (PoI/PoA) plus a Support Portal ticket with requested amount, duration (one-off or ongoing), reason, Source of Wealth, and Source of Funds (SoF required for one-off). Outcomes: approved in full, alternative offered, or denied.
 
-**Error Responses:**
+---
 
-| Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `400` | `ErrorInvalidField` | Limit value must be -1 or a non-negative number |
-| `400` | `ErrorInvalidField` | Cannot set limit below the already-used amount in current period |
-| `400` | `ErrorInvalidField` | Daily limit cannot exceed monthly limit |
-| `400` | `ErrorInvalidField` | Monthly limit cannot exceed lifetime limit (when both are positive) |
-| `403` | `ErrorPermissionDenied` | Limits can only be changed on Active cards |
-| `404` | `ErrorNotFound` | Card not found |
+## Card Top-Up
+
+Funds a wallet from an external Visa/Mastercard (AFT), Apple Pay or Google Pay. `external_card` needs capability `CardTopup`; `apple_pay`/`google_pay` need `WalletTopup`.
+
+### Register Source Card (PCI environment)
+
+User-scoped token required (S2S not supported); `user_id` is the user UUID. PCI base URLs: sandbox `https://wx-acquiring-card-manager-uat.wirexapp.com`, production `https://wx-acquiring-card-manager.wirexapp.com`.
+
+```
+POST {pci_base_url}/b2b/cards/topup?user_id={user_id}
+GET {pci_base_url}/b2b/cards/topup?user_id={user_id}
+DELETE {pci_base_url}/b2b/cards/topup/{card_id}?user_id={user_id}
+```
+
+Register body: `{ "card": { "name", "expiry_month", "expiry_year", "number", "cvv", "billing_details": { "address_line1", "address_line2"?, "postal_code", "country", "city", "state"? }, "label" } }` -> `{ "card_id", "card_label" }`. Only Visa and Mastercard; error code `0243` = card already linked to another Wirex account. Recommended: the PCI Compliant SDK (skill `wirex-baas-pci-sdk`) performs this registration inside Wirex-controlled views and returns the same `card_id`, so PAN/CVV never reach your app: Web `@wirexapp/card-topup-web` (docs `retail-pci-sdk-web-topup-collect`), React Native `@wirexapp/mobile-sdk`, Flutter `wirex_mobile_sdk`, iOS `WirexMobileSDK`, Android `com.wirexapp.baas:mobile-sdk`. Call the endpoints above directly only from a PCI DSS compliant environment.
+
+### Estimate
+
+```
+POST /api/v1/cards/topup/estimate
+```
+
+```json
+{
+  "external_card_id": "c34908da-d980-4a9c-9b39-4dabd6f6144e",
+  "destination_amount": "100000000",
+  "destination_token_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  "payment_method": "external_card"
+}
+```
+
+`external_card_id` is required for `external_card` (default) and rejected for `apple_pay`/`google_pay`. `destination_amount` is an integer string in token base units. Response: `estimation_id`, `expires_at` (Unix seconds), `source_amount`, `source_amount_precise`, `source_currency`, `destination_amount`, `destination_amount_precise`, `destination_token_address`, `destination_token_symbol`, `fee_amount`, `fee_amount_precise`, `fee_currency`, `rate`, `rate_precise` (scaled by `rate_decimals`), `rate_decimals`, `provider` (identifier of the acquirer the top-up is routed to; informational, do not branch on its value).
+
+### Execute
+
+```
+POST /api/v1/cards/topup/execute
+```
+
+Body: `estimation_id` (required), `device_id` (optional). For a wallet-method estimation also `wallet_payment_token` (max 16384 chars), `cardholder_name`, `billing_address` (`country_code`, `city`, `postal_code`, `address_line1` required; `state`, `address_line2` optional) and optional `wallet_transaction_id` (max 128); these are rejected for an `external_card` estimation. Response: `id`, `status`, optional `three_ds_state` (`flow`, `provider`, `status`, `status_reason`, `url`). `flow` is `Unknown` at execute (decided after the device check on the 3DS page): load `url` on the cardholder's device whenever it is present, through the PCI SDK 3DS surface or a browser/web view; the page completes frictionless or shows the challenge, and a top-up whose page is never loaded stays `Pending`. No `three_ds_state` = no 3DS step.
+
+Restricted top-up token: `POST /api/v1/cards/topup/token` with the user token (no body) -> `{ "access_token", "expires_at" }`. Accepted only by `POST /api/v1/cards/topup/estimate` and `/execute`; valid 15 minutes; mint one per armed quote; `401` if the user token is missing/invalid/expired or an S2S token is used, and `401 Token is not allowed for this endpoint` if sent elsewhere. Used as `checkoutToken` by the mobile SDKs' wallet checkout (token mode).
+
+Completion webhook: `POST /v2/webhooks/activities` with `type: CardTopup`, `direction: Inbound`, `source.type: ExternalCard`, steps `Initiated`, `CardIn`, `Review`, `CryptoIn` (`Reversal` if reversed). Errors: `ErrorNotFound` `estimation_id` (not found or expired), `ErrorInvalidField` `payment_method`, plus field-level `ErrorMissingField`/`ErrorInvalidField`.
 
 ---
 
 ## 3DS Authentication
 
+### Webhook
+
+`POST {your_webhook_base_url}/v2/webhooks/3ds`
+
+```json
+{
+  "card_id": "64120850-73a1-4df5-a074-d463258c9deb",
+  "owner": "0x1234...5678",
+  "user_address": "0x1234...5678",
+  "transaction_id": "00000000000000000000000000000001",
+  "merchant_name": "Amazon",
+  "amount": "100.00",
+  "currency": "USD",
+  "card_last_4": "1234"
+}
+```
+
+`owner` is deprecated and mirrors `user_address`. `transaction_id` is used for approve/decline. The payload carries no expiry; a request expires 5 minutes after creation.
+
 ### Get Pending 3DS Requests
 
 ```
 GET /api/v1/cards/3ds/requests
-Authorization: Bearer {user_token}
 ```
 
-**Query Parameters:**
+Response: JSON array (no `data` envelope; empty array when nothing is pending) of the webhook-shaped objects. Scoped to the caller; only undecided, unexpired requests.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `card_id` | string | No | Filter by specific card |
-| `status` | string | No | Filter: `pending`, `approved`, `declined`, `expired` |
-
-**Response: `200 OK`**
-
-```json
-{
-  "requests": [
-    {
-      "request_id": "3ds_req_001",
-      "card_id": "card_virt_001",
-      "card_last_four": "4321",
-      "merchant_name": "Example Store",
-      "merchant_country": "GB",
-      "merchant_category_code": "5411",
-      "amount": "49.99",
-      "currency": "USD",
-      "status": "pending",
-      "created_at": "2025-03-15T10:30:00Z",
-      "expires_at": "2025-03-15T10:35:00Z"
-    }
-  ],
-  "total": 1
-}
-```
-
----
-
-### Approve 3DS Request
+### Approve / Decline
 
 ```
-POST /api/v1/cards/3ds/requests/{requestId}/approve
-Authorization: Bearer {user_token}
+POST /api/v1/cards/3ds/requests/{transactionId}/approve
+POST /api/v1/cards/3ds/requests/{transactionId}/decline
 ```
 
-**Path Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `requestId` | string | Yes | The 3DS request identifier |
-
-**Response: `200 OK`**
-
-```json
-{
-  "request_id": "3ds_req_001",
-  "status": "approved",
-  "approved_at": "2025-03-15T10:31:00Z"
-}
-```
-
-**Error Responses:**
+No request body, no `action_token`; only the standard auth headers. Response `200 {}`.
 
 | Status | Error Reason | Description |
-|--------|-------------|-------------|
-| `400` | `ErrorNotSupported` | Request has already been approved or declined |
-| `404` | `ErrorNotFound` | 3DS request not found |
-| `410` | `ErrorExpired` | 3DS request has expired |
+|--------|--------------|-------------|
+| `400` | `ErrorMissingField` | `transaction_id` empty in path |
+| `400` | `ErrorNotFound` ("No active 3DS request for this transaction") | Unknown, already decided, expired, or another user's; indistinguishable, terminal, not retryable. No `401` |
+| `500` | `ErrorGeneral` | `Failed to query active 3DS requests` / `Failed to approve 3DS request` / `Failed to decline 3DS request` |
 
----
-
-### Decline 3DS Request
-
-```
-POST /api/v1/cards/3ds/requests/{requestId}/decline
-Content-Type: application/json
-Authorization: Bearer {user_token}
-```
-
-**Request Body (optional):**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `reason` | string | No | Decline reason for logging |
-
-**Request Example:**
-
-```json
-{
-  "reason": "unrecognized_merchant"
-}
-```
-
-| Reason Value | Description |
-|-------------|-------------|
-| `unrecognized_merchant` | User does not recognize the merchant |
-| `amount_mismatch` | Transaction amount is unexpected |
-| `suspected_fraud` | User suspects fraud |
-| `user_declined` | General decline (default) |
-
-**Response: `200 OK`**
-
-```json
-{
-  "request_id": "3ds_req_001",
-  "status": "declined",
-  "reason": "unrecognized_merchant",
-  "declined_at": "2025-03-15T10:31:30Z"
-}
-```
-
-**Error Responses:** Same as approve.
-
----
+A decided request leaves the pending list, so a second decision returns the same `ErrorNotFound`; an approve cannot replay over a decline.
 
 ### 3DS Handling Example
 
 ```javascript
-const axios = require('axios');
-
 const API_BASE = 'https://api-baas.wirexapp.com';
 
-// Webhook handler for 3DS requests
-async function handle3dsWebhook(webhookPayload, userToken) {
-  const { request_id, card_id, merchant_name, amount, currency, expires_at } =
-    webhookPayload;
-
-  console.log(
-    `3DS request: ${merchant_name} wants to charge ${amount} ${currency}`
-  );
-
-  // Check if request is still valid
-  if (new Date(expires_at) < new Date()) {
-    console.log('3DS request already expired.');
-    return;
-  }
-
-  // Decision logic (replace with your business rules)
-  const shouldApprove = await evaluateTransaction({
-    card_id,
-    merchant_name,
-    amount: parseFloat(amount),
-    currency,
+// POST /v2/webhooks/3ds handler
+async function handle3dsWebhook(payload, headers) {
+  const { transaction_id, merchant_name, amount, currency, card_last_4 } = payload;
+  const approved = await askUser({ merchant_name, amount, currency, card_last_4 }); // your UI, within 5 minutes
+  const action = approved ? 'approve' : 'decline';
+  const res = await fetch(`${API_BASE}/api/v1/cards/3ds/requests/${transaction_id}/${action}`, {
+    method: 'POST',
+    headers,
   });
-
-  if (shouldApprove) {
-    await axios.post(
-      `${API_BASE}/api/v1/cards/3ds/requests/${request_id}/approve`,
-      {},
-      { headers: { Authorization: `Bearer ${userToken}` } }
-    );
-    console.log(`3DS request ${request_id} approved.`);
-  } else {
-    await axios.post(
-      `${API_BASE}/api/v1/cards/3ds/requests/${request_id}/decline`,
-      { reason: 'user_declined' },
-      { headers: { Authorization: `Bearer ${userToken}` } }
-    );
-    console.log(`3DS request ${request_id} declined.`);
-  }
+  if (res.status === 400) return; // no longer active: terminal
 }
 
-// Poll for pending 3DS requests (alternative to webhook)
-async function checkPending3ds(userToken) {
-  const response = await axios.get(
-    `${API_BASE}/api/v1/cards/3ds/requests?status=pending`,
-    { headers: { Authorization: `Bearer ${userToken}` } }
-  );
-
-  return response.data.requests;
+// Fallback if the webhook was missed
+async function listPending3ds(headers) {
+  const res = await fetch(`${API_BASE}/api/v1/cards/3ds/requests`, { headers });
+  return res.json(); // array
 }
 ```
+
+The OTP-by-SMS method needs no partner calls.
 
 ---
 
 ## Webhook Payloads
 
-See [wirex-baas-webhooks reference](../wirex-baas-webhooks/references/REFERENCE.md) for complete card-related webhook payloads (card status, card limits, card activity, 3DS).
+- Card status `POST /v2/webhooks/cards`: same structure as a `GET /api/v1/cards` item (`id`, `card_wallet_address`, `status`, `status_reason`, `previous_status`, `generation`, `provider`, `limit`, `allowed_actions`, `card_data`, `created_at`, `updated_at`; plus `correlation_id`, `chain_id`, precise limit fields, and `funding_token`/`issuer_spender_address` on Bridge cards).
+- Card limits `POST /v2/webhooks/card-limits`: see [Limit Webhook](#limit-webhook).
+- Activities `POST /v2/webhooks/activities`: `type: CardTransaction` (`direction` `Outbound` debit / `Inbound` credit; `status` `Pending`/`Completed`/`Failed`; `status_reason` e.g. `InsufficientFunds`, `DailySpendAmountIsExceeded`, `ChainRejected`, `GeneralError`, `BroadcastFailed`; `source_amount`/`destination_amount` are always positive; `fee_amount` (card fee, absent when zero, not folded into `rate`) and `rrn` (card network reference); `operations[]` carry `operation_id`, `status`, `operation_reason`, `operation_amount` and `transaction_amount` (both negative for debits, positive for credits), `resulting_balance`, `rate`, `hash`; `activity_steps[]`). Debit steps `Initiated`, `CryptoOut`, `CardOut`, `Completed`, `Reversal`; credit steps `Initiated`, `CardIn`, `CryptoIn`, `Completed`. Crypto amounts may be `0` or missing until the crypto step executes.
+
+Operation fields: `operation_id` is stable across webhooks (key bookings on it); `status` is `Pending`/`Completed`/`Failed` and moves only forward; `operation_reason` is `Authorization`, `Clearing`, `Reversal`, `Refund`, `Representment`, `MoneySend`, `CreditAdjustment`, `DebitAdjustment`, `ChargebackRefund` or `ChargebackReversal`; `hash` is the on-chain hash only once `Completed` (while `Pending` it is an interim value, not an identifier); `resulting_balance` is reliable once `Completed` (can read `0` while `Pending`). Every amount has `amount` (display), `amount_precise` (exact, string) and `decimals`: use `amount_precise` for accounting. Each webhook repeats all operations of the transaction; a clearing, refund or reversal is a new operation. Activity `status`: `Pending` until the debit settles; `Completed` (a partially refunded purchase stays `Completed`); `Failed` (declined, or refunded/reversed in full; there is no `Cancelled`). Deduplicate on each operation's `operation_id` + `status`.
+- 3DS `POST /v2/webhooks/3ds`: see above.
+
+See [wirex-baas-webhooks reference](../../wirex-baas-webhooks/references/REFERENCE.md) for complete payloads.
 
 ---
 
 ## Error Codes
 
-### General Error Response Format
-
-All errors follow this structure:
+Error format:
 
 ```json
 {
-  "error_reason": "ErrorNotFound",
-  "error_description": "Card with ID card_xyz does not exist.",
-  "error_category": {
-    "category": "CategoryNotFound",
-    "http_status_code": 404
-  },
-  "error_details": [
-    { "key": "field", "details": "card_id" }
-  ]
+  "error_reason": "ErrorInvalidField",
+  "error_description": "Human-readable message",
+  "error_category": { "category": "CategoryValidationFailure", "http_status_code": 400 },
+  "error_details": [ { "key": "field", "details": "field_name" } ]
 }
 ```
 
-### Complete Error Code Reference
+| HTTP | `error_reason` | When |
+|------|----------------|------|
+| 400 | `ErrorMissingField` | Required field absent (`delivery_address`, `action_token`, `nonce`, ...) |
+| 400 | `ErrorInvalidField` | Bad format (e.g. `card_number_last4` not `^\d{4}$`), bad `action_token`/signature/`session_id` |
+| 400 | `ErrorInvalidStatus` | Action not allowed in the card's current status |
+| 400 | `ErrorNotSupported` | e.g. PIN on a non-physical card |
+| 400 | `ErrorNotFound` | No delivery methods/fees for country; no active 3DS request; card not found |
+| 400 | `ErrorGeneral` | `Delivery ID is required and must be positive`; invalid `payment_system`; `Capability is not active`; v3 priced order without `delivery_id` |
+| 400 | `ErrorNotSupported` | "You have no card order/delivery fees to pay" (fees not enforced for your company) |
+| 400 | `ErrorNotYetValid` | Reissue before the card is old enough (`reissuable_from` in `error_details`) |
+| 400 | `ErrorExpired` | Expired `action_token` |
+| 500 | `ErrorGeneral` | `Failed to issue virtual card` / `Failed to issue plastic card` / `Failed to activate card` / `Failed to get card` / `Failed to process delivery payment` |
 
-| HTTP Status | Error Reason | Description |
-|-------------|-------------|-------------|
-| `400` | `ErrorInvalidField` | Request body failed validation, invalid currency, delivery address, last four, action token, signature, SMS code, limit value, or phone not confirmed |
-| `400` | `ErrorNotSupported` | Operation not allowed: card already active/blocked/closed, virtual card activation attempt, pending transactions, card closed, card not blocked |
-| `400` | `ErrorInvalidField` | Limit constraints violated: limit below used amount, daily exceeds monthly, monthly exceeds lifetime |
-| `401` | `ErrorPermissionDenied` | Invalid or expired token or action token |
-| `403` | `ErrorPermissionDenied` | Card does not belong to user, capability not active, card not active, unblock not allowed (stolen) |
-| `404` | `ErrorNotFound` | Card, country, or 3DS request not found |
-| `409` | `ErrorNotSupported` | Maximum card count reached |
-| `410` | `ErrorExpired` | SMS code or 3DS request expired |
-| `422` | `ErrorInvalidField` | KYC not approved, country not supported, card not delivered, delivery not available |
-| `429` | `ErrorInvalidField` | Rate limited or max verification attempts reached |
+`Capability is not active` (`400`, `CategoryValidationFailure`) is returned by every issue endpoint when the user's capability for the format is not `Active`: re-read the capability rather than retrying.
 
 ---
 
 ## Field Validation Patterns
 
-### Card Issuance Fields
-
-| Field | Validation | Valid Examples | Invalid Examples |
-|-------|-----------|----------------|------------------|
-| `currency` | ISO 4217, 3 uppercase letters | `"USD"`, `"EUR"`, `"GBP"` | `"usd"`, `"US"`, `"USDT"` |
-| `invoice_id` | Non-empty string, starts with `inv_` | `"inv_abc123"` | `""`, `"abc123"` |
-| `delivery_method` | Enum: `standard`, `express` | `"standard"` | `"overnight"`, `"fast"` |
-
-### Address Fields
-
-| Field | Validation | Max Length |
-|-------|-----------|-----------|
-| `delivery_address.line1` | Required, non-empty | 200 chars |
-| `delivery_address.line2` | Optional | 200 chars |
-| `delivery_address.city` | Required, non-empty | 100 chars |
-| `delivery_address.state` | Optional | 100 chars |
-| `delivery_address.post_code` | Required, non-empty | 20 chars |
-| `delivery_address.country` | Required, ISO 3166-1 alpha-2 | 2 chars |
-
-### Limit Fields
-
-| Field | Type | Validation |
-|-------|------|-----------|
-| `daily` | number | Integer, >= -1 |
-| `monthly` | number | Integer, >= -1, >= daily (when both positive) |
-| `lifetime` | number | Integer, >= -1, >= monthly (when both positive) |
-
-### Action Token
-
 | Field | Validation |
 |-------|-----------|
-| `action_token` | Non-empty string, starts with `act_`, valid for 5 minutes from issuance |
-
-### SMS Code
-
-| Field | Validation |
-|-------|-----------|
-| `code` | Exactly 6 digits, numeric only |
-| `session_id` | Non-empty UUID string |
-
-### Last Four (Activation)
-
-| Field | Validation |
-|-------|-----------|
-| `last_four` | Exactly 4 digits, numeric only, must match card |
-
+| `card_name` / change-name `name` | `^[a-zA-Z0-9\-':+# @]{1,50}$` |
+| `name_on_card` | No pattern check; ignored on v1/v2 (the card carries the KYC name); on v3 printed uppercased and the card issuer may reject it (`400 "Request failed due to external validation failure"`). Do not rely on the published `nameOnCard` rule |
+| `card_number_last4` | Exactly 4 digits |
+| `expiry_date` (activation) | `MM/YYYY` |
+| `delivery_address.*` | See [Address Fields](#address-fields) |
+| `{type}` (fees/invoice) | `virtual`, `plastic`, `metal` (case-insensitive) |
+| `payment_system` (v3) | `Visa` or `MasterCard` |
+| `limit` values | Number; `-1` disables, `0` blocks all spending |
+| `action_token` | Valid 5 minutes; reusable across PAN, CVV and PIN |
+| `nonce` | Unix seconds, valid 5 minutes |
+| `session_id` | UUID |

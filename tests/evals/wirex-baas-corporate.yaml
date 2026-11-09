@@ -1,0 +1,12 @@
+evals:
+  - question: "What tokens does the Wirex BaaS Corporate API use and how is each obtained?"
+    criteria:
+      - "Partner token from POST /api/v1/token"
+      - "Corporation token from POST /api/v1/corporations/login"
+      - "Action token from POST /api/v1/confirmation/signature/verify for sensitive card actions"
+
+  - question: "Which endpoints can the corporate partner token call, and what happens with any other endpoint?"
+    criteria:
+      - "Lists POST /api/v1/corporations/register and POST /api/v1/corporations/login"
+      - "Lists GET /api/v1/employees/corporations and GET /api/v1/config/tokens"
+      - "States other endpoints return 401 ErrorNotSupported"

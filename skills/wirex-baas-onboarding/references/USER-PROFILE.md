@@ -5,75 +5,72 @@
 ```
 GET /api/v2/user
 Authorization: Bearer {token}
-X-User-Address: {userEoaAddress}
+X-User-Wallet: {userEoaAddress}
 X-Chain-Id: {chainId}
 ```
+
+With an S2S token, provide **exactly one** of `X-User-Wallet` (EOA, not the Smart Wallet), `X-User-Email` or `X-User-Id` (more than one is rejected with `ErrorInvalidField`, none with `ErrorMissingField`). With a Wirex user token, identity is in the token. A missing user returns `400` with `ErrorNotFound` ("User account not found"). The guide says there is no `404`, but the API reference for `GET /api/v2/user` also lists a `404` "User not found" (docs differ; handle both). The capabilities block is assembled from the user's cards and bank accounts, so a card or banking outage fails the whole call with `500` rather than returning a partial profile.
+
+The same object is delivered by the `POST {your_webhook_base_url}/v2/webhooks/user` webhook.
 
 ### Complete Response Schema
 
 ```json
 {
-  "id": "usr_abc123",
-  "owner": "0xAbC123...EOA",
+  "id": "00000000-0000-0000-0000-000000000001",
+  "user_id": "00000000-0000-0000-0000-000000000001",
+  "owner": "0xA7E41d5680dE394EaA2ed417169DFf56840Fb3EE",
+  "user_address": "0xA7E41d5680dE394EaA2ed417169DFf56840Fb3EE",
   "chain_id": 8453,
   "profile": {
-    "status": "Active",
-    "email": "user@example.com",
-    "first_name": "Jane",
-    "last_name": "Doe",
+    "first_name": "Alex",
+    "last_name": "Grey",
     "date_of_birth": "1990-01-15",
     "nationality": "GB",
+    "email": "alex.grey@example.com",
     "phone_number": "+447700900123",
-    "phone_confirmed": true,
-    "created_at": "2025-01-10T14:30:00Z",
-    "updated_at": "2025-01-12T09:00:00Z"
+    "status": "Active"
   },
   "residence_address": {
-    "line1": "10 Downing Street",
-    "line2": "Flat 2",
+    "line1": "123 High Street",
+    "line2": "Flat 4B",
     "city": "London",
-    "state": "England",
-    "post_code": "SW1A 2AA",
+    "state": null,
+    "post_code": "SW1A 1AA",
     "country": "GB"
   },
   "verification": {
     "status": "Approved",
     "levels": [
-      { "type": "SDD", "order": 1 }
+      { "status": "Approved", "type": "BDD", "name": "Basic Identity" },
+      { "status": "Approved", "type": "SDD", "name": "Standard Due Diligence" }
     ],
-    "documents": []
+    "documents": [
+      { "type": "passport", "id": "doc_123", "file_type": "pdf", "added_date": "2024-01-15T10:30:00Z" }
+    ]
   },
-  "external_providers": {
-    "sumsub": {
-      "applicant_id": "sb_applicant_123",
-      "status": "completed"
-    }
-  },
+  "external_providers": [
+    { "type": "cpn" }
+  ],
   "capabilities": [
-    {
-      "type": "VisaVirtualCard",
-      "status": "Active",
-      "status_reason": null,
-      "verification_requirements": [],
-      "prerequisites": []
-    },
     {
       "type": "SepaAccount",
       "status": "Active",
-      "status_reason": null,
-      "verification_requirements": [],
+      "verification_requirements": [ { "type": "SDD", "order": 1 } ],
       "prerequisites": []
     },
     {
-      "type": "VisaPlasticCard",
-      "status": "InProgress",
-      "status_reason": "address_verification_pending",
-      "verification_requirements": ["poa"],
-      "prerequisites": ["VisaVirtualCard"]
+      "type": "SepaOut1stParty",
+      "status": "NotFulfilled",
+      "status_reason": "Prerequisite SepaAccount is not active",
+      "verification_requirements": [ { "type": "SDD", "order": 1 } ],
+      "prerequisites": ["SepaAccount"]
     }
   ]
 }
 ```
+
+`id` and `owner` are **deprecated** mirrors of `user_id` and `user_address`; read the new names.
 
 ---
 
@@ -81,36 +78,24 @@ X-Chain-Id: {chainId}
 
 | Status | Meaning | Description |
 |--------|---------|-------------|
-| `Active` | Fully operational | User account is active and can use all granted capabilities |
-| `Pending` | Awaiting setup | User registered but onboarding is incomplete (e.g., KYC not started) |
-| `Blocked` | Temporarily suspended | Account has been blocked due to compliance review or suspicious activity |
-| `Deleted` | Permanently closed | Account has been permanently deleted; cannot be reactivated |
+| `Active` | Fully operational | User account is active |
+| `Pending` | Awaiting setup | User registered but not yet active |
+| `Blocked` | Suspended | Account is blocked |
+| `Deleted` | Closed | Account is deleted |
 
-### Status Transitions
-
-**Normal path:** Pending → Active ↔ Blocked → Active (unblocked)
-
-**Terminal:** Active → Deleted; Blocked → Deleted
+The docs list these four values (`Active`, `Pending`, `Blocked`, `Deleted`) without describing transitions.
 
 ---
 
 ## Verification Levels
 
-Verification levels determine the tier of services available to the user. Higher levels unlock greater transaction limits and additional capabilities.
+| Level | Full Name | Documents | Unlocks |
+|-------|-----------|-----------|---------|
+| `BDD` | Basic Due Diligence | PoI + selfie | Account creation, limited features |
+| `SDD` | Standard Due Diligence | PoI + PoA + selfie | Bank accounts, cards, standard transfers; higher spending limits |
+| `EDD` | Enhanced Due Diligence | Additional documentation | Higher limits, additional features |
 
-| Level | Full Name | Description | Typical Limits |
-|-------|-----------|-------------|----------------|
-| `BDD` | Basic Due Diligence | Minimal verification; limited functionality | Low transaction limits; crypto only |
-| `SDD` | Standard Due Diligence | Standard KYC completed; card and banking access | Standard limits; full card and banking |
-| `EDD` | Enhanced Due Diligence | Enhanced verification for high-value users | Elevated limits; premium features |
-
-### Level Requirements
-
-| Level | Requirements |
-|-------|-------------|
-| `BDD` | Email verification + basic profile |
-| `SDD` | Government-issued ID + selfie + proof of address |
-| `EDD` | SDD + source of funds documentation + enhanced screening |
+PoI = Proof of Identity, PoA = Proof of Address. The API enum (`verification.levels[].type`, `verification_requirements[].type`) is `N/A`, `BDD`, `SDD`, `XDDBridgeBase`, `EDD`. Each entry in `verification.levels` has `type`, `status` (`Pending`, `Approved`, `Rejected`, …) and a human-readable `name`.
 
 ---
 
@@ -123,9 +108,10 @@ Capabilities are the **feature-gating mechanism** in Wirex BaaS. Each capability
 ```json
 {
   "type": "VisaVirtualCard",
-  "status": "Active",
-  "status_reason": null,
-  "verification_requirements": [],
+  "status": "ActivationNotStarted",
+  "provider": "Wirex",
+  "status_reason": "Activation in progress, please wait for confirmation",
+  "verification_requirements": [ { "type": "SDD", "order": 1 } ],
   "prerequisites": []
 }
 ```
@@ -134,84 +120,80 @@ Capabilities are the **feature-gating mechanism** in Wirex BaaS. Each capability
 |-------|------|-------------|
 | `type` | string | The capability identifier (see tables below) |
 | `status` | string | Current status of this capability for the user |
-| `status_reason` | string or null | Human-readable reason when status is not `Active` |
-| `verification_requirements` | array of strings | Outstanding verification steps needed to activate |
-| `prerequisites` | array of strings | Other capabilities that must be `Active` first |
+| `provider` | string | Which side serves the capability: `Wirex` or `Bridge` (shown on card capabilities in the Capabilities guide) |
+| `status_reason` | string | Optional explanation of the status |
+| `verification_requirements` | array of objects | Required verification levels, each `{ "type": "SDD", "order": 1 }`, ordered by `order` |
+| `prerequisites` | array of strings | Other capability types that must be `Active` first |
 
 ### Capability Statuses
 
 | Status | Meaning | User Action |
 |--------|---------|-------------|
-| `Active` | Capability is available and usable | None; feature is live |
-| `ActivationNotStarted` | Capability exists but user has not begun activation | Start the activation process |
-| `InProgress` | Activation has been started but is not yet complete | Complete outstanding requirements |
-| `NotFulfilled` | Requirements exist that have not been met | Fulfill `verification_requirements` and `prerequisites` |
-| `NotAvailable` | Capability is not available for this user/region | N/A; cannot be activated |
+| `Active` | Capability is available for use | Feature is accessible |
+| `ActivationNotStarted` | Requirements met, activation needed | Call the activation endpoint |
+| `InProgress` | Activation in progress | Wait for completion |
+| `NotFulfilled` | Requirements not met | Complete KYC or prerequisites |
+| `NotRequired` | Present in the API reference enum; not described in the guides | — |
+| `NotAvailable` | Not available for this user | Cannot be activated |
+| `ExternalProviderRegistrationPending` | An external provider is still onboarding the user | Wait; the capability moves on its own |
+| `ExternalProviderVerificationRequired` | Wallet ownership must be verified with the external provider | Complete the provider's wallet verification |
+
+Typical flow: `NotFulfilled` → `ActivationNotStarted` → `InProgress` → `Active`.
 
 ---
 
 ## Capability Types
 
+Bank account capabilities require KYC verification before activation. Example: `SepaOut1stParty` requires `SepaAccount`; read each capability's `prerequisites` array instead of assuming a rule.
+
 ### Card Capabilities
 
-| Capability | Description | Prerequisites | Notes |
-|-----------|-------------|---------------|-------|
-| `VisaVirtualCard` | Issue Visa virtual cards | KYC Approved (SDD+) | Immediate digital issuance |
-| `VisaPlasticCard` | Issue Visa physical (plastic) cards | `VisaVirtualCard` active | Requires delivery address |
-| `CardTransfer` | Transfer funds to/from card balance | Any card active | Used for card top-up |
+| Capability | Description |
+|-----------|-------------|
+| `VisaVirtualCard` | Issue virtual Visa cards |
+| `VisaPlasticCard` | Issue physical Visa cards |
+| `VisaMetalCard` | Issue metal Visa cards |
+| `BridgeVirtualCard` | Virtual cards on the Bridge rail; resolved only where `VisaVirtualCard` is not active |
+| `BridgePlasticCard` | Physical cards on the Bridge rail; resolved only where `VisaPlasticCard` is not active |
+| `CardTransfer` | Push to card transfers |
+| `CardTopup` | Top up the wallet from a payment card |
+| `WalletTopup` | Top up from a device payment sheet (Apple Pay / Google Pay), separate from `CardTopup` (documented in the Capabilities guide) |
 
-### SEPA Banking Capabilities (Europe)
+### SEPA Banking (Europe)
 
-| Capability | Description | Prerequisites |
-|-----------|-------------|---------------|
-| `SepaAccount` | SEPA bank account (IBAN) | KYC Approved (SDD+) |
-| `SepaIn1stParty` | Receive SEPA transfers from own accounts | `SepaAccount` |
-| `SepaOut1stParty` | Send SEPA transfers to own accounts | `SepaAccount` |
-| `SepaIn3rdParty` | Receive SEPA transfers from third parties | `SepaAccount` |
-| `SepaOut3rdParty` | Send SEPA transfers to third parties | `SepaAccount` |
+`SepaAccount` (SEPA bank account, IBAN), `SepaIn1stParty`, `SepaIn3rdParty`, `SepaOut1stParty`, `SepaOut3rdParty`.
 
-### ACH Banking Capabilities (United States)
+### ACH Banking (United States)
 
-| Capability | Description | Prerequisites |
-|-----------|-------------|---------------|
-| `AchAccount` | ACH bank account | KYC Approved (SDD+) |
-| `AchIn1stParty` | Receive ACH transfers from own accounts | `AchAccount` |
-| `AchOut1stParty` | Send ACH transfers to own accounts | `AchAccount` |
-| `AchIn3rdParty` | Receive ACH transfers from third parties | `AchAccount` |
-| `AchOut3rdParty` | Send ACH transfers to third parties | `AchAccount` |
+`AchAccount`, `AchIn1stParty`, `AchIn3rdParty`, `AchOut1stParty`, `AchOut3rdParty`.
 
-### Faster Payments Capabilities (United Kingdom)
+USD accounts support both ACH and Fedwire. ACH and Fedwire are supported in all US states and territories except Texas (TX) and New York (NY): users resident there cannot open a USD account ([Bank Account Availability](https://docs.wirexapp.com/docs/bank-account-availability)). Activation: `POST /api/v1/bank/accounts` ([Capabilities guide](https://docs.wirexapp.com/docs/retail-capabilities)).
 
-| Capability | Description | Prerequisites |
-|-----------|-------------|---------------|
-| `FasterPaymentsAccount` | Faster Payments bank account | KYC Approved (SDD+) |
-| `FasterPaymentsIn1stParty` | Receive FPS from own accounts | `FasterPaymentsAccount` |
-| `FasterPaymentsOut1stParty` | Send FPS to own accounts | `FasterPaymentsAccount` |
-| `FasterPaymentsIn3rdParty` | Receive FPS from third parties | `FasterPaymentsAccount` |
-| `FasterPaymentsOut3rdParty` | Send FPS to third parties | `FasterPaymentsAccount` |
+### Faster Payments (United Kingdom)
 
-### SPEI Capabilities (Mexico)
+`FasterPaymentsAccount`, `FasterPaymentsIn1stParty`, `FasterPaymentsIn3rdParty`, `FasterPaymentsOut1stParty`, `FasterPaymentsOut3rdParty`.
 
-| Capability | Description | Prerequisites |
-|-----------|-------------|---------------|
-| `SpeiAccount` | SPEI bank account | KYC Approved (SDD+) |
-| `SpeiIn1stParty` | Receive SPEI from own accounts | `SpeiAccount` |
-| `SpeiOut1stParty` | Send SPEI to own accounts | `SpeiAccount` |
-| `SpeiIn3rdParty` | Receive SPEI from third parties | `SpeiAccount` |
-| `SpeiOut3rdParty` | Send SPEI to third parties | `SpeiAccount` |
+### SPEI (Mexico)
 
-### Regional Capabilities
+`SpeiAccount`, `SpeiIn1stParty`, `SpeiIn3rdParty`, `SpeiOut1stParty`, `SpeiOut3rdParty`.
+
+### Regional / Other Outbound Capabilities
 
 | Capability | Region | Description |
 |-----------|--------|-------------|
-| `PixOut3rdParty` | Brazil | Send Pix transfers to third parties |
-| `FpsHkOut3rdParty` | Hong Kong | Send FPS HK transfers to third parties |
-| `ImpsOut3rdParty` | India | Send IMPS transfers to third parties |
-| `InstapayOut3rdParty` | Philippines | Send InstaPay transfers to third parties |
-| `BiFastOut3rdParty` | Indonesia | Send BI-FAST transfers to third parties |
-| `NipOut3rdParty` | Nigeria | Send NIP transfers to third parties |
-| `IppOut3rdParty` | Thailand | Send IPP transfers to third parties |
-| `PseOut3rdParty` | Colombia | Send PSE transfers to third parties |
+| `PixOut3rdParty` | Brazil | Send Pix transfers |
+| `FpsHkOut3rdParty` | Hong Kong | Send FPS HK transfers |
+| `ChatsOut3rdParty` | Hong Kong | Send CHATS transfers |
+| `CipsOut3rdParty` | China | Send CIPS transfers |
+| `SwiftOut3rdParty` | — | Send SWIFT transfers |
+| `ImpsOut3rdParty` | India | Send IMPS transfers |
+| `InstapayOut3rdParty` | Philippines | Send InstaPay transfers |
+| `BiFastOut3rdParty` | Indonesia | Send BI-FAST transfers |
+| `NipOut3rdParty` | Nigeria | Send NIP transfers |
+| `IppOut3rdParty` | Thailand | Send IPP transfers |
+| `PseOut3rdParty` | Colombia | Send PSE transfers |
+
+The API reference enum also contains `FedwireOut3rdParty`, `CpnExternalProfile`, `TripleAExternalProfile`, `SavingsAccount` and `Loan`, which the retail guides do not describe. `StableExchange` is described in the FX guide: it must be `Active` on the user for FX (users without it are refused on both FX endpoints).
 
 ---
 
@@ -220,9 +202,9 @@ Capabilities are the **feature-gating mechanism** in Wirex BaaS. Each capability
 ### JavaScript: Check If User Can Issue Virtual Card
 
 ```javascript
-async function canIssueVirtualCard(userToken) {
+async function canIssueVirtualCard(userToken, userEoaAddress) {
   const response = await fetch('https://api-baas.wirexapp.com/api/v2/user', {
-    headers: { Authorization: `Bearer ${userToken}` },
+    headers: { Authorization: `Bearer ${userToken}`, 'X-User-Wallet': userEoaAddress, 'X-Chain-Id': '8453' },
   });
   const user = await response.json();
 
@@ -242,7 +224,7 @@ async function canIssueVirtualCard(userToken) {
 
   if (virtualCardCap.status === 'NotFulfilled') {
     console.log(
-      `Requirements not met: ${virtualCardCap.verification_requirements.join(', ')}`
+      `Requirements not met: ${virtualCardCap.verification_requirements.map((r) => r.type).join(', ')}`
     );
     return false;
   }
@@ -255,9 +237,9 @@ async function canIssueVirtualCard(userToken) {
 ### JavaScript: Build Feature Menu from Capabilities
 
 ```javascript
-async function buildFeatureMenu(userToken) {
+async function buildFeatureMenu(userToken, userEoaAddress) {
   const response = await fetch('https://api-baas.wirexapp.com/api/v2/user', {
-    headers: { Authorization: `Bearer ${userToken}` },
+    headers: { Authorization: `Bearer ${userToken}`, 'X-User-Wallet': userEoaAddress, 'X-Chain-Id': '8453' },
   });
   const user = await response.json();
 
@@ -300,29 +282,33 @@ async function buildFeatureMenu(userToken) {
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string | Unique user identifier |
-| `owner` | string | EOA address that owns this account |
-| `chain_id` | number | Primary blockchain chain ID (e.g., 8453 for Base) |
+| `user_id` | string (UUID) | User account identifier |
+| `user_address` | string | EOA address that owns this account |
+| `id` | string | **Deprecated.** Mirrors `user_id` |
+| `owner` | string | **Deprecated.** Mirrors `user_address` |
+| `chain_id` | integer | Chain where the account was registered (e.g., 8453 for Base) |
 | `profile` | object | User profile information |
 | `residence_address` | object | User's residential address |
-| `verification` | object | KYC verification status and level |
-| `external_providers` | object | Connected third-party provider info (e.g., SumSub) |
+| `verification` | object | KYC verification status, levels and documents |
+| `external_providers` | array | Linked external service providers |
 | `capabilities` | array | List of capability objects |
+| `last_login_ip` | string | IP address of the user's last non-S2S login; omitted until one is recorded |
+| `tags` | array of string | Platform tags on the account; omitted when none |
 
 ### Profile Object Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `profile.status` | string | Account status: `Active`, `Pending`, `Blocked`, `Deleted` |
+| `profile.status` | string | `Active`, `Pending`, `Blocked`, `Deleted` |
 | `profile.email` | string | Registered email address |
-| `profile.first_name` | string | First name (populated after KYC or Reliance registration) |
+| `profile.first_name` | string | First name (from KYC) |
 | `profile.last_name` | string | Last name |
-| `profile.date_of_birth` | string | Date of birth (ISO 8601) |
-| `profile.nationality` | string | Nationality (ISO 3166-1 alpha-2) |
-| `profile.phone_number` | string | Phone number in E.164 format (includes `+` prefix and country code) |
-| `profile.phone_confirmed` | boolean | Whether the phone number has been confirmed |
-| `profile.created_at` | string | Account creation timestamp (ISO 8601) |
-| `profile.updated_at` | string | Last profile update timestamp (ISO 8601) |
+| `profile.date_of_birth` | string | `YYYY-MM-DD` |
+| `profile.nationality` | string | ISO 3166-1 alpha-2 |
+| `profile.phone_number` | string | Phone number with country code |
+| `profile.registration_date` | string | When the user registered (ISO 8601, UTC) |
+
+The profile object has no `phone_confirmed`, `created_at` or `updated_at` fields in the API reference.
 
 ### Residence Address Fields
 
@@ -331,24 +317,29 @@ async function buildFeatureMenu(userToken) {
 | `residence_address.line1` | string | Street address line 1 |
 | `residence_address.line2` | string | Street address line 2 (optional) |
 | `residence_address.city` | string | City |
-| `residence_address.state` | string | State or province |
+| `residence_address.state` | string | State or province (optional) |
 | `residence_address.post_code` | string | Postal / ZIP code |
-| `residence_address.country` | string | Country (ISO 3166-1 alpha-2) |
+| `residence_address.country` | string | ISO 3166-1 alpha-2 |
 
 ### Verification Object Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `verification.status` | string | KYC status: `None`, `Applied`, `Pending`, `InReview`, `Approved`, `Canceled`, `Rejected` |
-| `verification.levels` | array | Array of verification level objects, each with `type` (e.g., `"SDD"`) and `order` |
-| `verification.documents` | array | Array of submitted document objects with `type`, `id`, `file_type`, `added_date` |
+| `verification.status` | string | `None`, `Pending`, `Approved`, `Rejected`, `Canceled`, `Applied`, `InReview` |
+| `verification.levels` | array | Objects with `type` (`BDD`, `SDD`, …), `status` and `name` |
+| `verification.documents` | array | Submitted documents with `type` (passport, identity_card, driver_license, proof_of_address), `id`, `file_type`, `added_date` |
 
-### External Providers Object
+### External Providers
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `external_providers.sumsub.applicant_id` | string | SumSub applicant identifier |
-| `external_providers.sumsub.status` | string | SumSub verification status |
+`external_providers` is an **array** of provider objects. Each has `type` (`Cpn`, `Triplea`, `WirexApp`), optional `account_id`, and a provider-specific sub-object (`cpn`, `triplea`, `wirex_app`, `freshdesk`) filled according to the type. `wirex_app` carries migration info (`user_id`, `sumsub_id`, `migration_stage`, `migration_status`); `triplea` carries `verification_status` (`None`, `Pending`, `Approved`, `Rejected`, `InReview`) and identifiers.
+
+### Linking a Freshdesk Contact
+
+```
+PUT /api/v1/user/freshdesk-id
+```
+
+Body `{ "freshdesk_id": "1234567890" }` (required) stores the user's Freshdesk contact id on their Wirex profile so helpdesk tickets can be matched to the Wirex user.
 
 ---
 
@@ -357,10 +348,10 @@ async function buildFeatureMenu(userToken) {
 ### Poll for Verification Approval
 
 ```javascript
-async function waitForApproval(userToken, maxAttempts = 60, intervalMs = 5000) {
+async function waitForApproval(userToken, userEoaAddress, maxAttempts = 60, intervalMs = 5000) {
   for (let i = 0; i < maxAttempts; i++) {
     const response = await fetch('https://api-baas.wirexapp.com/api/v2/user', {
-      headers: { Authorization: `Bearer ${userToken}` },
+      headers: { Authorization: `Bearer ${userToken}`, 'X-User-Wallet': userEoaAddress, 'X-Chain-Id': '8453' },
     });
     const user = await response.json();
 
@@ -368,7 +359,7 @@ async function waitForApproval(userToken, maxAttempts = 60, intervalMs = 5000) {
     console.log(`Attempt ${i + 1}: Verification status = ${status}`);
 
     if (status === 'Approved') {
-      console.log(`Verified at level: ${user.verification.level}`);
+      console.log(`Verified levels: ${user.verification.levels.map((l) => l.type).join(', ')}`);
       return user;
     }
 

@@ -16,6 +16,10 @@ SKILL_NAMES = [
     "wirex-baas-transfers",
     "wirex-baas-webhooks",
     "wirex-baas-sandbox",
+    "wirex-baas-corporate",
+    "wirex-baas-sdk",
+    "wirex-baas-pci-sdk",
+    "wirex-baas-external-auth",
 ]
 
 
