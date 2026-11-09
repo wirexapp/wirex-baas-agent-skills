@@ -16,8 +16,8 @@ This skill covers all money transfer capabilities in the Wirex Banking-as-a-Serv
 
 All transfer types in Wirex BaaS follow the **estimate-then-execute** pattern:
 
-1. **Estimate**: Submit transfer details to get a cost estimate. The response includes an `id` (estimation ID; `estimation_id` for card transfers) and an `expires_at` Unix timestamp, plus `estimated_amounts[]` (one entry per token, with `amount`, `precise_amount` in the token's smallest unit, `rate` and, where reported, `fee_amount` / `fee_precise_amount`).
-2. **Execute**: Submit the transfer using the `estimation_id` from step 1 (bank transfers can alternatively specify `amount` directly, not both) and the `token_address` to charge. Executing with an `estimation_id` uses the quoted amounts until `expires_at`.
+1. **Estimate**: Submit transfer details to get a cost estimate. The response includes an `id` (estimation ID; `estimation_id` for card transfers) and an `expires_at` Unix timestamp, plus `estimated_amounts[]` (one entry per token, with `amount` (token amount debited, fee included), `precise_amount` in the token's smallest unit, `rate` and, where reported, `fee_amount` / `fee_precise_amount`).
+2. **Execute**: Submit the transfer using the `estimation_id` from step 1 and the `token_address` to charge. Executing with an `estimation_id` uses the quoted amounts until `expires_at`. The SEPA and ACH guides now list `estimation_id` as required and single use (a retry with the same id is refused with `ErrorExpired`: estimate again); the API reference for `POST /api/v1/bank/transfer` still lists `amount` as an alternative, which is unverified live. If your company runs in `Signature` mode, the bank, corridor (`initiate`) and card transfer executes also carry `transaction_authorization` (see [Transaction Authorization](https://docs.wirexapp.com/docs/retail-transaction-authorization)); read the mode from `GET /api/v1/config` (`transactionAuthorizationMode`).
 
 This two-step process ensures the user sees exact costs before committing to the transfer.
 
@@ -28,8 +28,8 @@ SEPA (Single Euro Payments Area) enables EUR bank transfers. SEPA accounts are a
 ### Prerequisites
 
 - Account must have the **SepaAccount** capability enabled.
-- For third-party transfers: **SepaOut3rdParty** capability.
-- For first-party transfers: **SepaOut1stParty** capability.
+- `POST /api/v1/bank/transfer` always requires **SepaOut3rdParty**, even when the beneficiary is the user's own account.
+- **SepaOut1stParty** applies only to the corridor flow, when the saved recipient's name matches the user's verified name.
 
 ### Flow
 
@@ -39,7 +39,7 @@ SEPA (Single Euro Payments Area) enables EUR bank transfers. SEPA accounts are a
    - `ExternalProviderVerificationRequired`: wallet-linking path: `POST /api/v1/bank/accounts/init` (`{ "chain": "8453" }`, numeric chain ID as a string, returns `challenge` + `wallet_address`) → sign the challenge with the user's Primary wallet → `POST /api/v1/bank/accounts/complete` (`{ "chain", "signed_challenge" }`).
    - `ExternalProviderRegistrationPending`: wait, then re-check the capability.
    - `InProgress`: wait for the `/webhook/accounts/fiat` bank account webhook. `Active`: already provisioned.
-   - Note: docs differ. `ExternalProviderVerificationRequired` / `ExternalProviderRegistrationPending` and the `init` / `complete` endpoints are documented only in the SEPA bank details guide, not in the API reference `CapabilityStatus` enum.
+   - The API reference now includes `ExternalProviderVerificationRequired` / `ExternalProviderRegistrationPending` in the `CapabilityStatus` enum and has reference pages for the `init` / `complete` endpoints.
    - The two paths are mutually exclusive; calling the wrong one returns `400`.
 3. **Retrieve bank details**: Get the IBAN and BIC for the account.
    ```
@@ -60,17 +60,17 @@ See [references/BANKING.md](references/BANKING.md) for full request/response for
 
 > **WARNING:** ACH recipients require a `legal_address` field; SEPA does not.
 
-ACH (Automated Clearing House) enables USD bank transfers. ACH accounts are available to users residing in 48 countries (see [references/BANKING.md](references/BANKING.md) for the list) and all US states and territories.
+ACH (Automated Clearing House) enables USD bank transfers. ACH accounts are available to users residing in 48 countries (see [references/BANKING.md](references/BANKING.md) for the list) and all US states and territories except Texas (TX) and New York (NY): users resident there cannot open a USD account. The USD account supports both ACH and Fedwire.
 
 ### Prerequisites
 
 - Account must have the **AchAccount** capability enabled.
-- For third-party transfers: **AchOut3rdParty** capability.
-- For first-party transfers: **AchOut1stParty** capability.
+- `POST /api/v1/bank/transfer` always requires **AchOut3rdParty**, even when the beneficiary is the user's own account.
+- **AchOut1stParty** applies only to the corridor flow, when the saved recipient's name matches the user's verified name.
 
 ### Flow
 
-1. **Check capability**: Verify `AchAccount` in `GET /api/v2/user`; activate when its status is `ActivationNotStarted`.
+1. **Check capability**: Verify `AchAccount` in `GET /api/v2/user`. ACH is issued through Bridge and needs the extra verification level `XDDBridgeBase` on top of `SDD`: while the status is `NotFulfilled`, request it with `POST /api/v1/user/verification-token` (or `/verification-link`) and `"verification_level": "XDDBridgeBase"` (an omitted or unrecognised level silently falls back to `SDD`; the SDK helpers cannot pass it, call REST), then poll `GET /api/v2/user` while the status is `ExternalProviderRegistrationPending`. Activate only when it is `ActivationNotStarted`; otherwise the call fails with `ErrorInvalidStatus`.
 2. **Activate ACH bank details** (status then becomes `InProgress` until the bank account webhook reports details): Create ACH bank account credentials for the user.
    ```
    POST /api/v1/bank/accounts
@@ -121,7 +121,7 @@ Push-to-Card allows sending funds directly to a Visa or Mastercard debit card vi
    POST /api/v1/cards/transfer
    ```
 
-**Card validations**: Luhn check, Visa/Mastercard only, not expired. The tokenization response is `{ "value": "tok_..." }`; the recipient's `payment_details[].id` is used as `external_card_id` in the estimate. (The PCI SDK payout-collect guide says `external_card_id` is the card token instead; see PUSH-TO-CARD.md.) In browsers, `@wirexapp/card-oct-web` can tokenize inside Wirex iframes instead of calling the PCI endpoint directly.
+**Card validations**: Visa/Mastercard only, not expired; the card number's Luhn digit is not checked (validate it in your form or use the PCI Compliant SDK). The tokenization response is `{ "value": "<uuid>" }` (card token, UUID); pass it as `card.card_id` on the recipient and as `external_card_id` in the estimate (`payment_details[].card.card_id`, not `payment_details[].id`; the docs no longer disagree). The PCI Compliant SDK (browser `@wirexapp/card-oct-web`, React Native, Flutter, iOS, Android) is the recommended way to tokenize; call the PCI endpoint directly only from a PCI DSS compliant environment.
 
 See [references/PUSH-TO-CARD.md](references/PUSH-TO-CARD.md) for full details including PCI environment URLs.
 
@@ -135,7 +135,7 @@ POST /api/v3/bank/initiate/{corridor}   body: estimation_id, source_token_addres
 POST /api/v3/bank/confirm/{corridor}    body: transfer_id, actions[{type:"FundTransfer", data:{tx_hash}}]
 ```
 
-Corridors: `sepa`, `ach`, `faster-payments` (provider `service-bank`, `account_id` required, no confirm step); `pix`, `spei`, `fedwire`, `swift`, `cips`, `chats`, `fps_hk` (CPN: confirm step required); `imps`, `instapay`, `bi-fast`, `nip`, `ipp`, `pse` (offramp: no confirm). Branch on `required_actions` in the initiate response, not on the corridor name: when present, send the funds on-chain as described, then confirm. Each corridor needs its own `*Out3rdParty` capability `Active`. SEPA and ACH remain valid via the v2/v1 endpoints above. See [Corridor Transfers](https://docs.wirexapp.com/docs/retail-corridor-transfers) docs for field details.
+Corridors: `sepa`, `ach`, `faster-payments` (bank-account corridors: `account_id` required, no confirm step); `pix`, `spei`, `fedwire`, `swift`, `cips`, `chats`, `fps_hk` (CPN: confirm step required); `imps`, `instapay`, `bi-fast`, `nip`, `ipp`, `pse` (offramp: no confirm). Branch on `required_actions` in the initiate response, not on the corridor name: when present, send the funds on-chain as described, then confirm. Each corridor needs its own `*Out3rdParty` capability `Active`. On `sepa` and `ach`, an individual recipient whose name equals the user's verified name is paid under `SepaOut1stParty` / `AchOut1stParty` instead (checked by the estimate); business recipients are always third party. `transfer_id` is also the id of the outbound activity (`GET /api/v2/activity/single/{transfer_id}`). In `Signature` mode `initiate` carries `transaction_authorization`. SEPA and ACH remain valid via the v2/v1 endpoints above. See [Corridor Transfers](https://docs.wirexapp.com/docs/retail-corridor-transfers) docs for field details.
 
 ## Recipients
 
@@ -143,7 +143,7 @@ Wirex BaaS supports 16 payment-detail types for recipients (`type` enum): Crypto
 
 | Type            | Use Case                            | Key Fields                                |
 |-----------------|-------------------------------------|-------------------------------------------|
-| Card            | Push-to-Card transfers              | card_id (token), card_pan_last            |
+| Card            | Push-to-Card transfers              | card_id (token, UUID), card_pan_last      |
 | Sepa            | SEPA EUR bank transfers             | iban, bic                                 |
 | Ach             | ACH USD bank transfers              | routing_number, account_number, legal_address (bank_name optional) |
 | Crypto          | Crypto withdrawals                  | recipient_address (replaces `address`), network |
@@ -187,18 +187,18 @@ All transfers progress through a series of activity steps. The exact steps vary 
 | CardOut   | Funds sent via OCT to recipient card             |
 | Completed | Transfer successfully delivered                  |
 
-Activity `status` is `Pending`, `Completed` or `Failed` (documented activity statuses; `Cancelled` is not documented). Other step types seen on the activity feed: `BankIn`, `CryptoIn`, `CardIn`, `Reversal`, `SyntheticWrap`, `SyntheticUnwrap`.
+Activity `status` is `Pending`, `Completed` or `Failed` (there is no `Cancelled` status: a cancelled movement reads `Failed`). Other step types seen on the activity feed: `BankIn`, `CryptoIn`, `CardIn`, `Reversal`, `SyntheticWrap`, `SyntheticUnwrap`.
 
 ## Required Capabilities Summary
 
 | Transfer Type         | Required Capabilities                   |
 |----------------------|----------------------------------------|
 | SEPA account setup    | SepaAccount                            |
-| SEPA 1st-party send   | SepaOut1stParty                        |
-| SEPA 3rd-party send   | SepaOut3rdParty                        |
+| SEPA 1st-party send (corridor flow only) | SepaOut1stParty     |
+| SEPA 3rd-party send (and every `POST /api/v1/bank/transfer`) | SepaOut3rdParty |
 | ACH account setup     | AchAccount                             |
-| ACH 1st-party send    | AchOut1stParty                         |
-| ACH 3rd-party send    | AchOut3rdParty                         |
+| ACH 1st-party send (corridor flow only) | AchOut1stParty       |
+| ACH 3rd-party send (and every `POST /api/v1/bank/transfer`) | AchOut3rdParty |
 | Push-to-Card          | CardTransfer                           |
 | Corridor (v3) transfers | `<Corridor>Out3rdParty`, e.g. PixOut3rdParty |
 

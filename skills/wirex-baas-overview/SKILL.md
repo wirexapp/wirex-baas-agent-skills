@@ -1,6 +1,6 @@
 ---
 name: wirex-baas-overview
-description: "Wirex BaaS platform overview and getting started guide — start here for integration basics. Covers what Wirex BaaS is, the 6-step integration flow, partner onboarding, API environments (sandbox and production URLs), shared sandbox test credentials, required headers (Authorization, X-Chain-Id), error handling, blockchain networks (Base, Stellar, Tempo, XRPL), canonical token and contract registry addresses, MCP server setup, supported countries (68 card countries) with SEPA/ACH bank availability, and links to docs not covered by this plugin."
+description: "Wirex BaaS platform overview and getting started guide — start here for integration basics. Covers what Wirex BaaS is, the 6-step integration flow, partner onboarding, API environments (sandbox and production URLs), shared sandbox test credentials, required headers (Authorization, X-Chain-Id), error handling, blockchain networks (Base, Stellar, Tempo, XRPL), canonical token and contract registry addresses, MCP server setup, supported countries (72 card countries) with SEPA/ACH bank availability, and links to docs not covered by this plugin."
 license: Apache-2.0
 compatibility: "Requires network access. Compatible with Claude Code, Codex, and all Agent Skills spec tools."
 metadata:
@@ -111,7 +111,7 @@ Wirex BaaS provides separate environments for development and production use.
 
 ### PCI-Compliant Card Environments
 
-Card tokenization for push-to-card transfers requires calls to Wirex's PCI-compliant secure environment (subject to additional security requirements):
+Card data for top-up and push-to-card is submitted to Wirex's PCI-compliant secure environment, never to the BaaS API (subject to additional security requirements). The recommended way to reach it is the [PCI Compliant SDK](https://docs.wirexapp.com/docs/retail-pci-sdk), which selects the environment by name; the base URLs below are for calling the card-manager API directly:
 
 | Environment | Base URL | Purpose |
 |---|---|---|
@@ -194,6 +194,7 @@ Every API request must include the following headers:
 | `Authorization` | Most endpoints | `Bearer <token>`: S2S token from `/api/v1/token`, or a user token from `/api/v1/user/authorize` |
 | `X-Chain-Id` | Yes | Target chain ID (e.g., `84532` for Sandbox Base Sepolia, `8453` for Production Base). **Required for all requests.** |
 | `Content-Type` | Requests with a JSON body | `application/json` |
+| `X-Company-Id` | `GET /api/v1/config` without a token | Company id as a UUID |
 
 Additional headers for user-specific operations:
 
@@ -220,8 +221,8 @@ The following endpoints do not require user identity headers:
 | Prefix | Contents |
 |---|---|
 | `/api/v1/` | Base surface: authentication, users, KYC, wallets, cards, bank accounts, recipients, activity |
-| `/api/v2/` | Card issuance with a `delivery_id` invoice, recipients with payment details in one call, `[V2] Get user` / server-side create user, KYC data update, activity feed/search/single-item |
-| `/api/v3/` | Corridor transfers: one estimate/initiate/confirm flow for every payment rail |
+| `/api/v2/` | Card issuance with a `delivery_id` invoice, recipients with payment details in one call, `[V2] Get user` / server-side create user, KYC data update, the KYC questionnaire, activity feed/search/single-item |
+| `/api/v3/` | Corridor transfers: one estimate/initiate/confirm flow for every payment rail; card issuance, reads, reissue and order configuration; cross-chain wallet reads; activity feed/search/single-item |
 
 A `v2` endpoint does not deprecate its `v1` counterpart; pick one flow per integration and follow it end to end.
 
@@ -255,21 +256,21 @@ For setup details (config file locations, test prompts) and how to install these
 
 ## Supported Countries
 
-Non-custodial **card services** are available in 68 countries across four regions:
+Non-custodial **card services** are available in 72 countries across four regions:
 
 | Region | Country Count | Examples |
 |---|---|---|
-| **Europe** | 35 | United Kingdom, Germany, France, Spain, Italy, Netherlands, Sweden, Switzerland, Poland, Austria, and 25 more |
-| **Asia-Pacific** | 5 | Australia, Malaysia, Philippines, Taiwan, Thailand |
-| **Latin America** | 7 | Argentina, Brazil, Chile, Colombia, Ecuador, Mexico, Peru |
-| **Rest of the World** | 21 | UAE, South Africa, Japan, South Korea, Ukraine, Nigeria, Kenya, and 14 more |
+| **Europe** | 37 | United Kingdom, Germany, France, Spain, Italy, Netherlands, Sweden, Switzerland, Poland, Austria, and 27 more |
+| **Asia-Pacific** | 7 | Australia, Hong Kong, Malaysia, New Zealand, Philippines, Taiwan, Thailand |
+| **Latin America** | 9 | Argentina, Brazil, Chile, Colombia, Ecuador, El Salvador, Mexico, Panama, Peru |
+| **Rest of the World** | 19 | UAE, South Africa, Japan, South Korea, Ukraine, Nigeria, Kenya, and 12 more |
 
-Five more countries (Hong Kong, Indonesia, Singapore, United States, Vietnam) appear only in the ACH bank-account list. For the complete list with ISO country codes, see the [Supported Regions Reference](references/SUPPORTED-REGIONS.md).
+Four more countries (Indonesia, Singapore, United States, Vietnam) appear only in the ACH bank-account list. For the complete list with ISO country codes, see the [Supported Regions Reference](references/SUPPORTED-REGIONS.md).
 
 ### Bank Account Availability
 
 - **SEPA** -- EUR accounts, 29 countries (listed in the reference).
-- **ACH** -- USD accounts, 48 countries (including the US, with all US states and territories supported).
+- **ACH** -- USD accounts (ACH and Fedwire), 48 countries (including the US; all US states and territories are supported except Texas (TX) and New York (NY), whose residents cannot open a USD account).
 
 Availability depends on the user's country of residence. Check the user's `SepaAccount` / `AchAccount` capability via `GET /api/v2/user` (`Active`, `NotFulfilled`, `NotAvailable`). SEPA no longer appears automatically after KYC: it needs an explicit activation call (`POST /api/v1/bank/accounts` with `account_type: "Sepa"`, or the init/complete wallet-linking path); see the reference.
 

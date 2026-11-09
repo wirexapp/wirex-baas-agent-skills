@@ -267,7 +267,7 @@ Bearer tokens authenticate the caller. An action token proves the user just deli
 | `GetCardDetails` | Reading PAN, CVV and PIN | Yes | Yes |
 | `3dsChallenge` | Approving or declining a 3DS challenge | Yes | No |
 
-- By signature: `POST /api/v1/confirmation/signature/verify` with `action_type`, `message_signature`, `nonce` (Unix timestamp, no more than 5 minutes old) and optional `public_key` (required on XRPL). The user signs `By signing this I confirm that I am executing action {action_type} at {nonce}`.
+- By signature: `POST /api/v1/confirmation/signature/verify` with `action_type`, `message_signature`, `nonce` (Unix timestamp, no more than 5 minutes old) and optional `public_key` (required on XRPL). The user signs `By signing this I confirm that I am executing action {action_type} at {nonce}`. On EVM the signature is EIP-191 `personal_sign`; when the user's registered wallet is a smart contract, it is checked with the contract's ERC-1271 `isValidSignature`.
 - By SMS: `POST /api/v1/confirmation/sms`, then `POST /api/v1/confirmation/sms/verify`.
 - Phone confirmation also uses an action token.
 - Failures: `ErrorExpired` (`action_token: expired`) -- mint a new one; `ErrorInvalidField` with `invalid_purpose` (minted for a different action, retrying does not help), `invalid_token` or `invalid_claims`.

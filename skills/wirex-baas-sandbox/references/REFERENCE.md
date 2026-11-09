@@ -12,16 +12,16 @@ Complete endpoint reference for the Wirex BaaS sandbox Helper API at `https://ra
 
 ### `POST /account/retail/mint`
 
-Mint test tokens directly to a wallet address.
+Mint test tokens directly to a user's smart wallet address.
 
 **Request:**
 
 ```json
 {
   "chainId": "84532",
-  "token": "0x0774164DC20524Bb239b39D1DC42573C3E4C6976",
-  "to": "0xA7E41d5680dE394EaA2ed417169DFf56840Fb3EE",
-  "amount": "1000000000000000000"
+  "token": "0x7Af7cDbd557eD302F7538Db1e3d094C8BBcA665c",
+  "to": "0xAAFF0821A09A1Aac28B72dD3Ff410A7ea5FEb874",
+  "amount": "250000000"
 }
 ```
 
@@ -29,26 +29,37 @@ Mint test tokens directly to a wallet address.
 |-------|------|----------|-------------|
 | `chainId` | string | Yes | Chain ID (`84532` for Base Sepolia sandbox) |
 | `token` | string | Yes | Token contract address to mint |
-| `to` | string | Yes | Destination wallet address |
+| `to` | string | Yes | The user's smart wallet address |
 | `amount` | string | Yes | Amount in the token's smallest unit -- multiply the decimal amount by `10^decimals` |
 
-The `amount` is in the smallest unit, not whole tokens. WUSD/WEUR have 18 decimals, so 1 WUSD is `"1000000000000000000"`; USDC has 6 decimals, so 1000 USDC is `"1000000000"`.
+The `amount` is in the smallest unit, not whole tokens. Mint the base token: USDC and EURC have 6 decimals, so 250 USDC is `"250000000"`. On a registered smart wallet USDC arrives 1:1 as WUSD and EURC as WEUR. The balance can take more than a minute to appear.
 
 **Response (200):**
 
 ```json
 {
-  "txHash": "0x28da8dec81198cd43329c92ac5b7bcb048a48495bdbc69fc1c921da72fe42939",
-  "success": true
+  "ok": "Hell yeah!"
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `txHash` | string | On-chain transaction hash |
-| `success` | boolean | Whether the mint was successful |
-
 For sandbox token addresses, see [SKILL.md](../SKILL.md#sandbox-token-addresses-base-sepolia-chain-id-84532).
+
+---
+
+## Wallet Helpers
+
+Helpers for creating sandbox wallets and moving test tokens. Transfer helpers take the owner's private key in the request body -- use them only with keys generated for the sandbox.
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /account/generate?chainId=84532` | Returns a fresh key pair: `{ "address", "privateKey" }`. Nothing is deployed |
+| `POST /account/retail` | Deploys a smart wallet for a fresh owner key and registers it under your company. Body: `{ "chainId": "84532", "companyId": "0x…" }`. Returns `wallet` (owner EOA), `privateKey` and `account` (smart wallet) |
+| `GET /account/retail/balance?chainId=84532&account={address}&token={token}&decimals={decimals}` | Reads a token balance. Send the token's own `decimals` -- the default is `18` on EVM and Tron, `7` on Stellar |
+| `POST /account/retail/transfer/request` | Requests a token transfer from a smart wallet. Body: `chainId`, `account`, `privateKey`, `token`, `to`, `amount` (smallest unit). Returns `{ "hash", "call" }` |
+| `POST /account/retail/transfer/execute` | Executes the requested transfer. Body: `chainId`, `account`, `privateKey` and the `call` from the request |
+| `POST /account/retail/unwrap/transfer/request` | As `transfer/request`, but debits the synthetic token (`unwrapToken`, `unwrapAmount`) and sends the base token (`token`, `amount`). Execute with `transfer/execute` |
+
+Mint to and transfer from `account`, the smart wallet. Register the user with the owner (`wallet`) as described in [Onboarding](https://docs.wirexapp.com/docs/retail-onboarding).
 
 ---
 
@@ -122,7 +133,7 @@ GET /bank/sepa/transfers/pending?region=GB&email=alex.grey@example.com
 ]
 ```
 
-Use the `id` value as `transactionId` in transfer completion/revert requests.
+Use the `id` value, not the entry's own `transactionId`, as `transactionId` in transfer completion, cancel and revert requests. A payout is listed only once the user's SEPA account has received at least one deposit.
 
 ---
 
@@ -149,6 +160,14 @@ Mark a pending outbound SEPA transfer as completed.
 **Response (200):** `{ "success": true }`
 
 **Webhooks triggered:** `/v2/webhooks/activities` with `status=Completed`
+
+---
+
+### `POST /bank/sepa/transfer/cancel`
+
+Cancel a pending outbound SEPA transfer. The payout ends `Failed` and the debit is refunded.
+
+**Request:** same body as complete (`region`, `email`, `transactionId`).
 
 ---
 
@@ -216,7 +235,7 @@ Simulate an incoming ACH USD deposit to a user's account.
 
 Mark a pending outbound ACH transfer as completed.
 
-> **Note:** In sandbox, all outbound ACH transfers remain in pending state indefinitely. Use `complete` or `revert` to simulate the external ACH network processing the transfer.
+> **Note:** In sandbox, `ach` corridor payouts end `Failed` by themselves within minutes and the debit is refunded; they never reach the bank simulator, so `complete` and `revert` answer `No transfer found`.
 
 **Request:**
 
@@ -248,6 +267,19 @@ Simulate a returned ACH transfer. This can only be called after a transfer has b
 
 Each endpoint runs a complete ISO-8583 message flow (authorization, clearing, reversal, refund, etc.) against a card and triggers `/v2/webhooks/activities` webhooks with `type=CardTransaction`.
 
+### Single-Message Simulators
+
+The simplest way to create a card transaction. The body is `{ "cardId", "amount" }`; the amount is in **GBP**.
+
+| Endpoint | Simulates |
+|----------|-----------|
+| `POST /card/transaction/pos` | In-store purchase |
+| `POST /card/transaction/epos` | Card-not-present purchase |
+| `POST /card/transaction/atm` | ATM cash withdrawal |
+| `POST /card/transaction/credit` | Original Credit (funds pushed to the card) |
+
+The response carries `success` and the ISO 8583 `responseCode`. A decline is still `200`: an amount the wallet cannot cover answers `"success": false`, `"responseCode": "51"`.
+
 ### Common Request Format
 
 All card flow endpoints accept the same base request:
@@ -276,7 +308,9 @@ All card flow endpoints accept the same base request:
 
 For a same-currency purchase, set `settlementAmount`/`settlementCurrency` equal to `amount`/`currency`. To simulate FX, use different values.
 
-`POST /card/auth-and-multi-clearing` additionally requires `clearingAmounts` (array of numbers) -- the per-clearing local amounts whose sum equals the auth amount.
+`POST /card/auth-and-multi-clearing` additionally requires `clearingAmounts` (array of numbers) -- the per-clearing local amounts whose sum equals the auth amount. Other flows that need an extra amount (`reversalAmount`, `refundAmount`, `clearingAmount`, `secondAuthAmount`, `adjustmentAmount`) answer `400 {"error": "<field> is required"}` without it.
+
+Every flow answers `200`; the decision is in the body. A declined authorization carries `auth.response.responseCode: "51"` and the flow stops.
 
 ### Common Response (200)
 
@@ -349,8 +383,6 @@ Each flow returns the ISO messages it produced. Fields are present only when the
 | `POST /card/debit-adjustment` | Debit adjustment |
 | `POST /card/balance-inquiry` | Balance inquiry |
 
-> The earlier `/card/transaction/pos|epos|atm|credit` endpoints are not listed in the current docs (the 3DS section mentions `/card/transaction/epos` only in passing, without a spec).
-
 ---
 
 ## 3DS Challenge Simulation
@@ -371,7 +403,7 @@ No card flow above produces a pending 3DS request. `POST /card/3ds/initiate` rai
 | `cardId` | string (UUID) | Yes | Card `id` returned by Wirex BaaS card issuance |
 | `transactionCurrency` | string | No | ISO 4217 alphabetic code (`USD`, `EUR`). Default `USD` |
 
-**Response (200), live sandbox 2026-10-25:**
+**Response (200):**
 
 ```json
 {
@@ -387,7 +419,7 @@ No card flow above produces a pending 3DS request. `POST /card/3ds/initiate` rai
 | `currency` | string | Echo of `transactionCurrency`, alphabetic (`"USD"`, `"EUR"`) |
 | `bin` | string | First 6 digits of the card number |
 
-> The docs (updated 2026-10-21) also list `amount` (number), `merchant`, and `currency` as an ISO 4217 **numeric** code (`"840"`); the live sandbox returned neither `amount` nor `merchant`, and an alphabetic `currency`. The simulator-generated amount and merchant are in the pending request: `GET /api/v1/cards/3ds/requests` -> `{ "transaction_id", "merchant_name", "amount": "475.09", "currency": "USD", "card_last_4", "card_id", "user_address", "owner" }`. Match by `transactionId` / `transaction_id`.
+> The amount and merchant are generated by the simulator and are not in this response. Read them from the pending request: `GET /api/v1/cards/3ds/requests` -> `{ "transaction_id", "merchant_name", "amount": "475.09", "currency": "USD", "card_last_4", "card_id", "user_address", "owner" }`. Match by `transactionId` / `transaction_id`.
 
 **Test flow:** initiate -> `GET /api/v1/cards/3ds/requests` with the card owner's token (listed within a few seconds, with `merchant_name`, `amount` and `card_last_4`) -> `POST /api/v1/cards/3ds/requests/{transactionId}/approve` or `/decline` with an empty body -> `200 {}`, the challenge leaves the pending list. A second decision returns `400` `ErrorNotFound` ("No active 3DS request for this transaction"). An undecided challenge expires 5 minutes after creation.
 

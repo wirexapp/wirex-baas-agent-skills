@@ -33,7 +33,7 @@ SEPA accounts **require activation**: verification alone does not provision an I
 | `NotRequired`                          | Capability does not apply to this user                                |
 | `NotAvailable`                         | Not available for the user's country of residence                     |
 
-> Note: docs differ. `ExternalProviderVerificationRequired` and `ExternalProviderRegistrationPending` (and the `/api/v1/bank/accounts/init` and `/complete` endpoints) appear only in the SEPA bank details guide; the API reference `CapabilityStatus` enum lists only `Active`, `ActivationNotStarted`, `InProgress`, `NotFulfilled`, `NotRequired`, `NotAvailable`, and has no reference page for `init` / `complete`.
+> The API reference `CapabilityStatus` enum now also lists `ExternalProviderRegistrationPending` and `ExternalProviderVerificationRequired`, and `/api/v1/bank/accounts/init` and `/complete` have reference pages (their examples show `"chain": "polygon"`; this skill sends the numeric chain ID as a string, as the SEPA bank details guide says).
 
 ### Activate SEPA Account (standard)
 
@@ -98,11 +98,11 @@ Retrieves all bank accounts for the user, including SEPA details (IBAN and BIC).
 }
 ```
 
-The list is under `data`, as in the API reference schema (the guides show `accounts`; live sandbox returned `data`, 2026-10-25). Paging behaviour above was observed live in sandbox: without paging parameters the whole list is returned. `account_type` values: `Sepa`, `Swift`, `FasterPayment`, `Ach`, `Spei`. `details` may also carry `mandatory_reference` (if present it MUST be set as the incoming transfer comment so the funds are credited to the right account), `sort_code`, `clabe`. Extra query parameter: `sort` (`name` default, or `usage`).
+The list is under `data`, as in the API reference schema and now in the SEPA and ACH guides too (live sandbox returned `data`, 2026-10-25). Paging behaviour above was observed live in sandbox: without paging parameters the whole list is returned. `account_type` values: `Sepa`, `Swift`, `FasterPayment`, `Ach`, `Spei`. `details` may also carry `mandatory_reference` (if present it MUST be set as the incoming transfer comment so the funds are credited to the right account), `sort_code`, `clabe`. Extra query parameter: `sort` (`name` default, or `usage`).
 
 The `id` field uses a composite `{account_id}:{details_id}` format. Use this composite ID as the `account_id` in transfer estimate and execute requests.
 
-**Account Statuses:** `Pending` (provisioning), `Active` (ready), `Blocked` (suspended), `Closed` (terminated).
+**Account Statuses:** `Pending` (provisioning), `Active` (ready), `Blocked` (suspended), `Closed` (terminated), `Failed` (provisioning failed at the bank provider; the account cannot be used). Each entry also carries `created_at`.
 
 ### Bank Account Webhook
 
@@ -209,15 +209,16 @@ For company recipients, use `company_name` instead of `first_name`/`last_name`:
 |------------------------------------------|--------|------------------------------------------------------|
 | id                                       | string | Estimation ID (use in execute step)                  |
 | expires_at                               | number | Unix timestamp when estimate expires                 |
-| amount                                   | number | The requested transfer amount                        |
+| amount                                   | number | Fiat amount the recipient receives                   |
+| amount_precise / decimals                | string / integer | `amount` as an integer string, and its decimal places (`18`) |
 | currency                                 | string | Transfer currency (EUR)                              |
 | estimated_amounts                        | array  | Array of per-token quote objects                     |
-| estimated_amounts[].amount               | number | Human-readable token amount to debit                 |
+| estimated_amounts[].amount               | number | Human-readable token amount to debit, fee included   |
 | estimated_amounts[].precise_amount       | string | Amount in the token's smallest unit (exponent is the token's `decimals`, not always 18) |
 | estimated_amounts[].token_address        | string | Token contract address                               |
 | estimated_amounts[].token_symbol         | string | Token symbol (e.g., WEUR)                            |
-| estimated_amounts[].rate                 | number | Exchange rate (token per EUR)                        |
-| estimated_amounts[].fee_amount           | number | Per-token fee (token precision); absent when no per-token fee is reported |
+| estimated_amounts[].rate                 | number | EUR per 1 token                                      |
+| estimated_amounts[].fee_amount           | number | Per-token fee included in the debited amount (token precision); absent when no per-token fee is reported |
 | estimated_amounts[].fee_precise_amount   | string | Same fee in the token's smallest unit; absent under the same condition |
 
 ---
@@ -226,7 +227,7 @@ For company recipients, use `company_name` instead of `first_name`/`last_name`:
 
 ### POST /api/v1/bank/transfer
 
-Execute a SEPA transfer using the estimation ID or a direct amount.
+Execute a SEPA transfer using the estimation ID (the guide now requires it; the API reference also lists a direct amount).
 
 **Request Headers:**
 
@@ -255,7 +256,7 @@ Execute a SEPA transfer using the estimation ID or a direct amount.
 }
 ```
 
-**Request Body (with direct amount):**
+**Request Body (with direct amount, API reference only):**
 
 ```json
 {
@@ -279,13 +280,14 @@ Execute a SEPA transfer using the estimation ID or a direct amount.
 |----------------|--------|----------|------------------------------------------------------|
 | account_id     | string | Yes      | The SEPA bank account ID (`{account_id}:{details_id}`) |
 | token_address  | string | Yes      | Token to charge from the user's balance |
-| estimation_id  | string | No*      | Estimation ID from the estimate step                 |
-| amount         | number | No*      | Fiat amount (if not using estimation; uses current market rates) |
+| estimation_id  | string | Yes (guide) / No* (API reference) | Estimation ID from the estimate step. Single use |
+| amount         | number | No*      | API reference only: fiat amount (if not using estimation); dropped from the guides |
 | reference      | string | No       | Payment reference                                    |
+| transaction_authorization | object | Conditional | Required in `Signature` mode, see [Transaction Authorization](https://docs.wirexapp.com/docs/retail-transaction-authorization) |
 | recipient      | object | Yes      | Recipient name details (same as estimate)            |
 | recipient_account | object | Yes   | Recipient bank details (same as estimate)            |
 
-*Provide either `estimation_id` or `amount`, not both. Recipient fields: `first_name` + `last_name` for a person, `company_name` for a business. The system picks `SepaOut1stParty` or `SepaOut3rdParty` by whether the recipient name matches the user's verified name.
+*API reference: provide either `estimation_id` or `amount`, not both; the guide requires `estimation_id`. The execute is not idempotent: a retry with the same `estimation_id` is refused with `ErrorExpired`, request a new estimate. Recipient fields: `first_name` + `last_name` for a person, `company_name` for a business. This endpoint always checks `SepaOut3rdParty`, even for the user's own account; `SepaOut1stParty` applies only to the corridor flow.
 
 **Response (200 OK):**
 
@@ -301,7 +303,22 @@ The `id` is the activity ID for tracking the transfer progress via webhooks.
 
 ## ACH Bank Details
 
-ACH accounts are available to users residing in these 48 countries (plus all US states and territories): AD, AR, AU, AT, BE, BR, BG, CL, CO, CY, CZ, DK, EE, FI, FR, DE, GI, GR, HK, HU, IS, ID, IE, IT, LV, LT, LU, MY, MT, MX, MC, ME, NL, NO, PE, PL, PT, RO, SG, SK, ES, SE, CH, TW, TH, GB, US, VN. Check the `AchAccount` capability (`Active`, `ActivationNotStarted`, `InProgress`, `NotFulfilled`, `NotAvailable`) in `GET /api/v2/user`.
+ACH accounts are available to users residing in these 48 countries (plus all US states and territories except Texas (TX) and New York (NY), where users cannot open a USD account; the USD account supports both ACH and Fedwire): AD, AR, AU, AT, BE, BR, BG, CL, CO, CY, CZ, DK, EE, FI, FR, DE, GI, GR, HK, HU, IS, ID, IE, IT, LV, LT, LU, MY, MT, MX, MC, ME, NL, NO, PE, PL, PT, RO, SG, SK, ES, SE, CH, TW, TH, GB, US, VN. Check the `AchAccount` capability (`NotAvailable`, `NotFulfilled`, `ExternalProviderRegistrationPending`, `ActivationNotStarted`, `InProgress`, `Active`) in `GET /api/v2/user`.
+
+### AchAccount activation (Bridge, `XDDBridgeBase`)
+
+ACH accounts are issued through an external provider, Bridge: on top of `SDD` the user must complete the level `XDDBridgeBase`, and Wirex registers the user with Bridge before activation. The capability lists the levels in `verification_requirements` (`SDD` order 1, `XDDBridgeBase` order 2).
+
+| Status | Meaning | Next step |
+|--------|---------|-----------|
+| `NotAvailable` | Country is not supported | none |
+| `NotFulfilled` | A level in `verification_requirements` is missing | `POST /api/v1/user/verification-token` or `/verification-link` with `{"verification_level": "XDDBridgeBase"}`; the user completes SumSub |
+| `ExternalProviderRegistrationPending` | Not yet registered and verified with Bridge | Poll `GET /api/v2/user`; do not call activation yet |
+| `ActivationNotStarted` | Ready | `POST /api/v1/bank/accounts` |
+| `InProgress` | Account being provisioned | Wait for the bank account webhook |
+| `Active` | Provisioned | `GET /api/v1/bank/accounts` |
+
+An omitted or unrecognised `verification_level` silently falls back to `SDD`, so a user who holds `SDD` never reaches `XDDBridgeBase` and `AchAccount` stays `NotFulfilled`. `sdk.api.baas.user.getVerificationToken()` / `getVerificationLink()` send an empty body and cannot pass the level: call REST. The user must hold `SDD` before starting `XDDBridgeBase`.
 
 ### Activate ACH Bank Account
 
@@ -325,7 +342,7 @@ Creates ACH bank account credentials (account number and routing number) for the
 }
 ```
 
-After activation the capability becomes `InProgress` and a bank account webhook is sent when the account is ready. Then use `GET /api/v1/bank/accounts` to retrieve the full account details (account number, routing number). The response follows the same structure as SEPA (`data[]` in the API reference, `accounts[]` in the guides), with `details.account_number` and `details.routing_number`.
+After activation the capability becomes `InProgress` and a bank account webhook is sent when the account is ready. Then use `GET /api/v1/bank/accounts` to retrieve the full account details (account number, routing number). The response follows the same structure as SEPA (`data[]`), with `details.account_number` and `details.routing_number`.
 
 ---
 
@@ -379,7 +396,7 @@ Estimate the cost and exchange rate for an ACH transfer.
 
 **Response (200 OK):**
 
-Uses the same response format as SEPA estimates:
+Uses the same response format as SEPA estimates (`amount` is what the recipient receives; `estimated_amounts[].amount` is the debit, fee included; `rate` is USD per 1 token):
 
 ```json
 {
@@ -455,7 +472,7 @@ SEPA and ACH transfers emit activity events as the transfer progresses through e
 
 **Steps:** Initiated → CryptoOut → Review → BankOut → Completed
 
-Activity `status` is `Pending`, `Completed` or `Failed` (`Cancelled` is not documented). SEPA activities have `type: Sepa`, ACH `type: AchPush`.
+Activity `status` is `Pending`, `Completed` or `Failed` (there is no `Cancelled` status: a cancelled movement reads `Failed`). SEPA activities have `type: Sepa`, ACH `type: AchPush`.
 
 See [wirex-baas-webhooks reference](../wirex-baas-webhooks/references/REFERENCE.md) for complete activity webhook payloads (activity types `Sepa` / `AchPush`).
 
@@ -486,7 +503,7 @@ All errors follow the standard Wirex BaaS error format with nested `error_catego
 | `ErrorMissingField` / `ErrorInvalidField` / `ErrorNotFound` | `account_id`: required / invalid format / not found or not owned by user |
 | `ErrorMissingField` | `recipient`, `recipient_account.iban`, `recipient_account.bic`, `amount` (amount or `estimation_id` required) |
 | `ErrorInvalidField` | `recipient_account.iban` / `.bic` invalid format; `token_address` invalid |
-| `ErrorNotSupported` | `recipient`: capability (`SepaOut1stParty` / `SepaOut3rdParty`) not active |
+| `ErrorGeneral` | `Capability is not active`: `SepaOut3rdParty` is not `Active` (the endpoint always checks it) |
 | `ErrorGeneral` (400) | Activation: "Account capability does not need activation or is not available"; wallet linking: "External provider wallet verification is not required for this account" |
 | `ErrorInvalidField` (400) | `chain` not numeric or unsupported (error reports the field as `chain_id`) |
 
@@ -497,6 +514,7 @@ These endpoints never return `404`: a missing or ineligible resource is a `400`.
 | Error Reason | Description |
 |-------------|-------------|
 | `ErrorNotFound` | User not found or not verified |
-| `ErrorInvalidStatus` | User account not active |
-| `ErrorInvalidField` | Invalid account type, or capability not available / does not need activation |
+| `ErrorInvalidStatus` | `AchAccount` is not `ActivationNotStarted` on activation: verification missing, Bridge registration pending, or already activated |
+| `ErrorInvalidField` | Invalid account type |
+| `ErrorGeneral` | Transfer: `Capability is not active`, `AchOut3rdParty` is not `Active` (the endpoint always checks it) |
 | `ErrorMissingField` | `legal_address` and other required recipient fields |

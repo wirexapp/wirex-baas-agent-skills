@@ -28,7 +28,7 @@ Wirex BaaS onboarding is a **three-step process** that takes a user from zero st
 POST /api/v1/user/retail/validate
 ```
 
-Empty body; the user is identified from the access token and identity headers (Privy credentials). Response: `{ "users": [ { "id", "user_id", "email", "wallet_address", "user_address" } ] }`. `users` is a **list** and is **empty when the credentials are not registered** -- proceed to Step 1. A non-empty list means "already onboarded": route to login, do not run onboarding again. `id`/`wallet_address` are deprecated mirrors of `user_id`/`user_address`.
+Empty body; the user is identified from the access token and identity headers (Privy credentials). Works on the Privy and Crossmint paths only; with an S2S token call `GET /api/v2/user` instead. Response: `{ "users": [ { "id", "user_id", "email", "wallet_address", "user_address" } ] }`. `users` is a **list** and is **`null`, not an empty array, when the credentials are not registered** -- proceed to Step 1. A non-empty list means "already onboarded": route to login, do not run onboarding again. `id`/`wallet_address` are deprecated mirrors of `user_id`/`user_address`.
 
 ---
 
@@ -67,7 +67,7 @@ POST /api/v2/user
 
 > **IMPORTANT:** `sharing_data` and `initial_data` are **mutually exclusive** — do not provide both in the same request.
 
-> **Docs inconsistency:** the API reference schema marks `initial_data.is_pep`, all `profile` fields and `residence_address` city/country/line1/post_code as required, while the Hosted KYC guide registers with only email + country. The Hosted example below follows the guide.
+> **Docs inconsistency:** the API reference schema marks `initial_data.is_pep`, all `profile` fields and `residence_address` city/country/line1/post_code as required, while the Hosted KYC guide registers with only email + country. The Hosted example below follows the guide. Always send `residence_address.country`: capabilities and the verification token depend on it, and it cannot be added afterwards.
 
 #### Hosted KYC Request
 
@@ -153,7 +153,7 @@ POST /api/v1/user/retail
 }
 ```
 
-`country` is the ISO 3166-1 alpha-2 residence country; optional `referrer_address` is the EOA of the referring user. Response: `{ "id": "..." }`. Afterwards exchange the Privy tokens for a Wirex user token (`POST /api/v1/user/authorize`).
+`country` is the ISO 3166-1 alpha-2 residence country (optional; omitted, it defaults to the country of the caller's IP address; the email and wallet come from the Privy identity token, not the body); optional `referrer_address` is the EOA of the referring user. Response: `{ "id": "..." }`. Afterwards exchange the Privy tokens for a Wirex user token (`POST /api/v1/user/authorize`).
 
 ---
 
@@ -182,7 +182,7 @@ Three KYC flows are available, each suited to different integration depths. Wire
 | `Pending` | Verification checks being executed on Wirex side | Wait |
 | `InReview` | Verification checks being executed on Wirex side | Wait |
 | `Approved` | Verification approved | Full access granted |
-| `Canceled` | Verification rejected | Contact Wirex support |
+| `Canceled` | Verification cancelled (spelled with one `l`) | Contact Wirex support |
 | `Rejected` | Verification rejected | Contact Wirex support |
 
 ### KYC Completion Endpoints
@@ -194,7 +194,7 @@ After registration, direct the user to complete KYC:
 | `POST /api/v1/user/verification-link` | `{ "redirect_uri": "..." }` | Redirect user to the hosted SumSub widget |
 | `POST /api/v1/user/verification-token` | `{ "token": "..." }` | Initialize the SumSub Web/Mobile SDK in-app |
 
-Both are **POST** and accept an optional body `{ "verification_level": "SDD" }` (enum `N/A`, `BDD`, `SDD`, `XDDBridge`, `EDD`).
+Both are **POST** and accept an optional body `{ "verification_level": "SDD" }` (enum `N/A`, `BDD`, `SDD`, `XDDBridgeBase`, `EDD`). Omitted or unrecognised, the level falls back to `SDD` without an error; `XDDBridgeBase` (SDD + tax identification number) is required for ACH accounts. The SDK methods `getVerificationToken()` / `getVerificationLink()` send an empty body, so they always run at `SDD`; call the REST endpoint for any other level. Accepted documents: [Supported Identity Documents](https://docs.wirexapp.com/docs/retail-kyc-supported-id-documents), [Supported Proof of Address Documents](https://docs.wirexapp.com/docs/retail-kyc-supported-poa-documents).
 
 **Questionnaire (SumSub Shared and KYC Sharing via API):** Wirex needs the `onboarding_survey_baas_v1` answers -- either pre-filled on the SumSub applicant or submitted after registration with `POST /api/v2/user/questionary` (`{ "questionary_id": "onboarding_survey_baas_v1", "sections": [...] }`, response `{}`). Users registered before this endpoint existed have no answers on file and need a submission. Sections, options and errors: [KYC-FLOWS.md](references/KYC-FLOWS.md#submitting-the-questionnaire-via-api).
 
@@ -231,7 +231,7 @@ See [USER-PROFILE.md](references/USER-PROFILE.md) for the complete profile schem
 
 ## Webhooks
 
-Delivered to `{your_webhook_base_url}` + path. Delivery: HTTP POST JSON, 10 s timeout, failed deliveries are NOT retried, no auth headers (see the wirex-baas-webhooks skill).
+Delivered to `{your_webhook_base_url}` + path. Delivery: HTTP POST JSON, 10 s timeout, a failed delivery is retried up to 5 times with exponential backoff and then dropped (retries can arrive out of order and more than once, so handlers must be idempotent), no auth headers (see the wirex-baas-webhooks skill).
 
 ### Wallet Webhook
 
@@ -259,7 +259,7 @@ Wallet status values: `Confirmed` (properly configured with required modules), `
 POST /v2/webhooks/user
 ```
 
-Fires when user profile, verification status or capability status changes. The payload has the same structure as the `GET /api/v2/user` response (`user_id`, `user_address`, `chain_id`, `profile`, `residence_address`, `verification`, `external_providers`, `capabilities`; `id`/`owner` are deprecated).
+Fires when user profile or verification status changes. The payload is the `GET /api/v2/user` object **without `capabilities`** (`user_id`, `user_address`, `chain_id`, `profile`, `residence_address`, `verification`, `external_providers`; `id`/`owner` are deprecated); after a verification change call `GET /api/v2/user` to read capabilities.
 
 ### User Webhook (Legacy)
 

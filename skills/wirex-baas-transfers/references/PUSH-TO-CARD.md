@@ -26,7 +26,7 @@ Card tokenization must be performed against the PCI-compliant card manager servi
 
 All card data (card number, cardholder name) is sent only to the PCI endpoint and never to the main API. The main API only receives tokenized references.
 
-In browser apps, `@wirexapp/card-oct-web` collects the card number inside Wirex-served iframes and returns the same token (`externalCardId`, `brand`, `bin`, `last4`), replacing the direct PCI call.
+Recommended: the PCI Compliant SDK collects the card inside Wirex-controlled views and returns the same card token, so the PAN never reaches your app or servers (browser `@wirexapp/card-oct-web` returns `externalCardId`, `brand`, `bin`, `last4`; also React Native `@wirexapp/mobile-sdk` profile `oct-destination`, Flutter `wirex_mobile_sdk`, iOS `WirexMobileSDK`, Android `com.wirexapp.baas:mobile-sdk`). Call the PCI environment directly only from a PCI DSS compliant environment.
 
 ---
 
@@ -71,15 +71,15 @@ Tokenize a card for use in Push-to-Card transfers. The card number is validated 
 |-----------------|---------|----------|----------------------------------------------------|
 | card_number     | string  | Yes      | Full card number (PAN). Visa or Mastercard only.   |
 | cardholder_name | string  | Yes      | Name as printed on the card (uppercase recommended)|
-| card_label      | string  | Yes      | Display label for the card                         |
+| card_label      | string  | No       | Display label for the card                         |
 | is_saved        | boolean | Yes      | Whether to save the card for future use            |
-| is_third_party  | boolean | Yes      | `true` if the card belongs to someone else         |
+| is_third_party  | boolean | No       | `true` if the card belongs to someone else         |
 
 **Validations Performed:**
 
 | Validation          | Description                                          |
 |--------------------|------------------------------------------------------|
-| Luhn check          | Card number must pass the Luhn algorithm             |
+| Luhn check          | Not checked: the card number's Luhn digit is not verified; validate it in your form or use the PCI Compliant SDK |
 | Network check       | Only Visa and Mastercard are supported               |
 | Expiration check    | Card must not be expired (if expiry provided)        |
 
@@ -87,7 +87,7 @@ Tokenize a card for use in Push-to-Card transfers. The card number is validated 
 
 ```json
 {
-  "value": "tok_a1b2c3d4e5f6789012345678"
+  "value": "63c4dd27-1f95-42b1-9a09-35cdda05f4c6"
 }
 ```
 
@@ -95,7 +95,7 @@ Tokenize a card for use in Push-to-Card transfers. The card number is validated 
 
 | Field | Type   | Description                                         |
 |-------|--------|-----------------------------------------------------|
-| value | string | Card token identifier for use in recipient creation (`card.card_id`) |
+| value | string (UUID) | Card token. Pass it as `card.card_id` when creating the recipient and as `external_card_id` on the transfer |
 
 `is_third_party` is `false` for the user's own card and `true` for a card belonging to another person; third-party transfers may have additional compliance requirements and limits. Use the last 4 digits of the PAN for `card_pan_last` in step 2.
 
@@ -126,7 +126,7 @@ Register the tokenized card as a recipient for transfers.
   "type": "Card",
   "currencies": ["USD", "EUR"],
   "card": {
-    "card_id": "tok_abc123def456ghi789",
+    "card_id": "63c4dd27-1f95-42b1-9a09-35cdda05f4c6",
     "card_pan_last": "1111"
   }
 }
@@ -163,7 +163,7 @@ Register the tokenized card as a recipient for transfers.
       "type": "Card",
       "currencies": ["USD", "EUR"],
       "card": {
-        "card_id": "tok_abc123def456ghi789",
+        "card_id": "63c4dd27-1f95-42b1-9a09-35cdda05f4c6",
         "card_pan_last": "1111"
       }
     }
@@ -171,7 +171,7 @@ Register the tokenized card as a recipient for transfers.
 }
 ```
 
-Use the `payment_details[].id` as the `external_card_id` in the estimate step. (The card-transfer guide's field table describes `external_card_id` as the card token `card.card_id`, while its examples and the tokenization/recipients guides use `payment_details[].id`; this skill follows the latter. The PCI SDK payout-collect guide states the opposite: `external_card_id` is the card token, the same value as `card.card_id`, and `payment_details[].id` is not accepted by the transfer endpoints. Not confirmed live: if the transfer endpoints reject the payment-details ID, retry with the card token `card.card_id`.) `card_pan_last` must be exactly 4 digits.
+Use `payment_details[].card.card_id` (the card token) as the `external_card_id` in the estimate step, not `payment_details[].id` (the card-transfer, recipients and tokenization guides now agree; `payment_details[].id` is the `recipient_payment_details_id` of a bank payout). Not confirmed live in sandbox. `card_pan_last` must be exactly 4 digits.
 
 ---
 
@@ -194,7 +194,7 @@ Estimate the cost and fees for a Push-to-Card transfer.
 
 ```json
 {
-  "external_card_id": "uuid-payment-details-id",
+  "external_card_id": "uuid-card-token",
   "currency": "USD",
   "amount": 50.00,
   "tokens": ["0xb4bB2032A73A53C0Aa7Dc9ee2d9658a978fA7bC2"]
@@ -205,7 +205,7 @@ Estimate the cost and fees for a Push-to-Card transfer.
 
 | Field            | Type     | Required | Description                              |
 |------------------|----------|----------|------------------------------------------|
-| external_card_id | string   | Yes      | Payment details ID from recipient creation (not the card token directly) |
+| external_card_id | string   | Yes      | Card token (`payment_details[].card.card_id` on the recipient), not `payment_details[].id` |
 | currency         | string   | No       | Transfer currency (default: EUR per guide) |
 | amount           | number   | Yes      | Amount to send to the card               |
 | tokens           | string[] | Yes      | Token address(es) to quote against       |
@@ -218,14 +218,18 @@ Estimate the cost and fees for a Push-to-Card transfer.
   "expires_at": 1704110400,
   "currency": "USD",
   "amount": 50.00,
-  "fee_amount": 1.50,
+  "amount_precise": "50000000000000000000",
+  "decimals": 18,
+  "fee_amount": 0,
   "estimated_amounts": [
     {
       "amount": 51.50,
       "precise_amount": "51500000000000000000",
       "token_address": "0xb4bB2032A73A53C0Aa7Dc9ee2d9658a978fA7bC2",
       "token_symbol": "WUSD",
-      "rate": 1.0
+      "rate": 1.0,
+      "fee_amount": 1.5,
+      "fee_precise_amount": "1500000000000000000"
     }
   ]
 }
@@ -239,14 +243,15 @@ Estimate the cost and fees for a Push-to-Card transfer.
 | expires_at                         | number | Unix timestamp when estimate expires     |
 | currency                           | string | Transfer currency                        |
 | amount                             | number | Amount credited to the card              |
-| fee_amount                         | number | Fee charged for the transfer             |
+| amount_precise / decimals          | string / integer | `amount` in base units, scaled by `decimals` |
+| fee_amount                         | number | **Deprecated, always `0`.** Read the fee per token from `estimated_amounts[].fee_amount` |
 | estimated_amounts                  | array  | Per-token debit amounts                  |
 | estimated_amounts[].amount         | number | Human-readable token amount to debit     |
 | estimated_amounts[].precise_amount | string | Amount in the token's smallest unit (exponent is the token's `decimals`, not always 18) |
 | estimated_amounts[].token_address  | string | Token contract address                   |
 | estimated_amounts[].token_symbol   | string | Token symbol (WUSD, WEUR)               |
 | estimated_amounts[].rate           | number | Exchange rate applied                    |
-| estimated_amounts[].fee_amount / fee_precise_amount | number / string | Per-token fee; absent when no per-token fee is reported |
+| estimated_amounts[].fee_amount / fee_precise_amount | number / string | Per-token fee, included in `amount`; `fee_precise_amount` is always scaled by 18 decimals whatever the token's `decimals` |
 
 ---
 
@@ -280,6 +285,7 @@ Execute the Push-to-Card transfer using the estimation ID.
 |----------------|--------|----------|--------------------------------------|
 | estimation_id  | string | Yes      | Estimation ID from step 3            |
 | token_address  | string | Yes      | Token to debit (must be one of the `estimated_amounts` entries, e.g. WUSD or WEUR) |
+| transaction_authorization | object | Conditional | Required when your company's `transactionAuthorizationMode` is `Signature`, see [Transaction Authorization](https://docs.wirexapp.com/docs/retail-transaction-authorization) |
 
 **Response (200 OK):**
 
@@ -299,7 +305,7 @@ Push-to-Card transfers progress through the following steps:
 
 **Steps:** Initiated → CryptoOut → Review → CardOut → Completed
 
-Activity `status` is `Pending`, `Completed` or `Failed` (`Cancelled` is not documented; the card-transfer guide also lists `Processing`, which is not in the API reference enum). The final `Completed` step type exists for push-to-card. Webhook `type` is `CardTransfer`, `direction` is always `Outbound`; `destination.card` carries `id`, `pan_last`, `payment_system` (`VISA` or `MASTERCARD`).
+Activity `status` is `Pending`, `Completed` or `Failed` (there is no `Cancelled` status: a cancelled movement reads `Failed`; the card-transfer guide also lists `Processing`, which is not in the API reference enum). The final `Completed` step type exists for push-to-card. Webhook `type` is `CardTransfer`, `direction` is always `Outbound`; `destination.type` is `ExternalCard` and `destination.card` carries `id` and `pan_last` (the guide no longer lists `payment_system`).
 
 See [wirex-baas-webhooks reference](../wirex-baas-webhooks/references/REFERENCE.md) for complete activity webhook payloads (transfer type: `CardTransfer`).
 
@@ -311,7 +317,7 @@ See [wirex-baas-webhooks reference](../wirex-baas-webhooks/references/REFERENCE.
 
 | Error Reason | Field | Description |
 |-------------|-------|-------------|
-| `ErrorMissingField` | `external_card_id` | Card token / payment details ID is required |
+| `ErrorMissingField` | `external_card_id` | Card token (`card.card_id`) is required |
 | `ErrorInvalidField` | `amount` | Amount must be greater than zero |
 | `ErrorMissingField` | `tokens` | At least one token address required |
 | `ErrorNotSupported` | | CardTransfer capability not active |
@@ -319,10 +325,10 @@ See [wirex-baas-webhooks reference](../wirex-baas-webhooks/references/REFERENCE.
 | `ErrorNotFound` | `estimation_id` | Estimation not found or expired |
 | `ErrorInsufficientFunds` | | User lacks sufficient token balance |
 
-Tokenization (PCI environment) errors, all HTTP 400: invalid card number (Luhn), unsupported card type (only Visa and Mastercard), card expired, missing required field. Recipient creation: `ErrorMissingField` for `first_name` / `last_name` / `company_name` / `type` / `card` / `card.card_id` / `card.card_pan_last`; `ErrorInvalidField` for `card.card_pan_last` (must be exactly 4 digits).
+Tokenization (PCI environment) errors, all HTTP 400: unsupported card type (only Visa and Mastercard), card expired, missing required field. Recipient creation: `ErrorMissingField` for `first_name` / `last_name` / `company_name` / `type` / `card` / `card.card_id` / `card.card_pan_last`; `ErrorInvalidField` for `card.card_pan_last` (must be exactly 4 digits).
 
 ### Common Troubleshooting
 
 | Issue                          | Cause                                     | Resolution                                |
 |--------------------------------|-------------------------------------------|-------------------------------------------|
-| Tokenization fails             | Invalid card number or unsupported network| Verify card is Visa/Mastercard and passes Luhn |
+| Tokenization fails             | Invalid card number or unsupported network| Verify card is Visa/Mastercard and not expired (Luhn is not checked) |

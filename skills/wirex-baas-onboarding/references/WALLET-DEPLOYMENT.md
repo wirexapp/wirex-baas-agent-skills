@@ -197,7 +197,7 @@ POST {your_webhook_base_url}/v2/webhooks/wallets
 ### Webhook Handling Rules
 
 - Wirex expects a **2xx response within 10 seconds**
-- Failed deliveries are logged but **NOT automatically retried**
+- A failed delivery is retried up to 5 times with exponential backoff, then dropped; retries can arrive out of order and more than once
 - Implement idempotent handlers for duplicate events
 - Contact Wirex support for event replay
 

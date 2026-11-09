@@ -10,7 +10,7 @@ Reference for Wirex BaaS retail card endpoints. Base URLs: sandbox `https://api-
 - [Card Listing and Details](#card-listing-and-details)
 - [Card Order Fees and Delivery](#card-order-fees-and-delivery)
 - [Card Issuance](#card-issuance)
-- [Card Lifecycle Management](#card-lifecycle-management)
+- [Card Lifecycle Management](#card-lifecycle-management) (incl. [Reissue a Card](#reissue-a-card))
 - [Verification and Confirmation](#verification-and-confirmation)
 - [Secure Card Details Retrieval](#secure-card-details-retrieval)
 - [Card Limits](#card-limits)
@@ -52,7 +52,7 @@ GET /api/v1/cards
 | `page_size` | integer | Page size (default 25) |
 | `sort` | string | `name` (ascending, default) or `usage` (descending usage) |
 
-`GET /api/v3/cards` returns the same list across **every chain** the user holds a card on; `GET /api/v3/cards/{cardId}` reads one card the same way. Same query parameters and `CardResponse` shape; `chain_id` names each entry's chain.
+`GET /api/v3/cards` returns the same list across **every chain** the user holds a card on; `GET /api/v3/cards/{cardId}` reads one card the same way. Same query parameters and `CardResponse` shape plus `product`, `product_type` and `region`; `chain_id` names each entry's chain.
 
 **Response `200`:**
 
@@ -111,12 +111,14 @@ GET /api/v1/cards
 | `balances[]` | Optional per-token balances (`token_address`, `token_symbol`, `balance`, `reference_balance`, `reference_currency`, `is_active`) |
 | `delivery_address` | Optional, for physical cards |
 | `limit.*_precise` | Base units as decimal string scaled by `limit.decimals` (18) |
+| `product`, `product_type` | v3 reads only. The card product and funding type; `product` is absent for a card issued on the issuer's defaults |
+| `region` | v3 reads only. The card's region as reported by the issuer, e.g. `GB` |
 | `card_data.format` | `Virtual`, `Plastic`, `Metal` |
 | `card_data.card_number_first_4` | Only while status is `Requested` or `NotActivated` |
 | `card_data.card_number_last_4`, `expiry_date` (`MM/YYYY`) | Only when status is not `Requested`/`NotActivated` |
 
-`allowed_actions[].type` values: `Activate`, `Block`, `Unblock`, `Close`, `SetLimit`, `GetDetails`, `GetCvv`, `GetPin`, `SetActiveBalance`.
-> Note: docs differ. The guide table lists the first eight; `SetActiveBalance` appears only in the `GET /api/v1/cards` reference enum.
+`allowed_actions[].type` values: `Activate`, `Block`, `Unblock`, `Close`, `SetLimit`, `GetDetails`, `GetCvv`, `GetPin`, `Reissue` (`relative_path` `/api/v3/cards/:cardId/reissue`), `SetActiveBalance`.
+> Note: docs differ. The guide table lists the first nine; `SetActiveBalance` appears only in the `GET /api/v1/cards` reference enum.
 
 ### Get Single Card
 
@@ -130,7 +132,7 @@ Returns the same card object as one list item, including the `limit` object (see
 
 ## Card Order Fees and Delivery
 
-> Fee endpoints apply only if your account manager advised fee handling. If fees are not enforced, they return `400` with `error_details: [{"key":"request","details":"Card fees are not enforced"}]`; skip fee steps and issue the card directly.
+> Fee endpoints apply only if your account manager advised fee handling. If fees are not enforced, the fees and fee-invoice endpoints return `400 ErrorNotSupported` ("You have no card order/delivery fees to pay") with `error_details: [{"key":"field","details":"fees_enforced"},{"key":"issue","details":"not_supported"}]`; skip fee steps and issue the card directly.
 
 ### Get Order Fees
 
@@ -196,15 +198,15 @@ GET /api/v3/cards/config
   "formats": [
     {
       "format": "Virtual",
-      "offerings": [
-        { "payment_system": "Visa", "designs": ["WirexBlack", "WirexBlue"], "card_programs": ["WIREX_ATM_EU"], "countries": ["GB", "DE", "FR"] }
+      "products": [
+        { "product": "Standard", "product_type": "Debit", "provider": "Wirex", "payment_system": "Visa", "designs": ["WirexBlack", "WirexBlue"], "card_programs": ["WIREX_ATM_EU"], "countries": ["GB", "DE", "FR"] }
       ]
     }
   ]
 }
 ```
 
-`format`: `Virtual`, `Plastic`, `Metal`. A format with nothing configured returns an empty `offerings` array. A market with two designs on different programs appears as two offerings over the same countries: filter by country and union the results.
+`format`: `Virtual`, `Plastic`, `Metal`. `products[].product` is the name sent as `product` on a v3 order; `product_type` is `Debit` or `Credit`; `provider` e.g. `Wirex`. A company with nothing configured receives empty collections, not an error. Filter by the user's residence country; one product name can appear more than once.
 
 ---
 
@@ -224,7 +226,7 @@ All issue endpoints return `200` with `{ "id": "<card id>" }`; the card starts `
 | `delivery_address` | object | Physical only | See [Address Fields](#address-fields) |
 | `delivery_provider` | string | No | Courier provider |
 | `card_name` | string | No | Display name (1-50 chars) |
-| `name_on_card` | string | No | Printed name (2-26 chars per guide; not enforced by the API, see Field Validation Patterns) |
+| `name_on_card` | string | No | Accepted and ignored: the card carries the user's KYC name. Use v3 to print a different name |
 
 ### v2 -- Direct Fee
 
@@ -246,20 +248,24 @@ All issue endpoints return `200` with `{ "id": "<card id>" }`; the card starts `
 | `delivery_address` | object | Physical only | Omit for virtual |
 | `delivery_provider` | string | No | Courier provider |
 | `card_name` | string | No | 1-50 chars |
-| `name_on_card` | string | No | 2-26 chars per guide (not enforced by the API, see Field Validation Patterns) |
+| `name_on_card` | string | No | Accepted and ignored: the card carries the user's KYC name. Use v3 to print a different name |
 
 ### v3 -- Bridge Rail and Configurable Issuance
 
 Fee invoice is the v2 call (no v3 invoice endpoint). Issue on a per-format path (no `{type}`): `POST /api/v3/cards/virtual`, `/api/v3/cards/plastic`, `/api/v3/cards/metal`. On-chain integrations only (not External Authorization).
 
-All v2 fields plus:
+All v2 fields plus the product fields below; `delivery_id` is required only when this order is priced above zero, and `name_on_card` is printed uppercased:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `design` | string | No | One of the company's designs for the format (from `GET /api/v3/cards/config`); omitted = issuer default |
-| `card_program` | string | No | Program (carries cash-withdrawal terms); omitted = first program configured for the format and billing country |
-| `payment_system` | string | No | `Visa` or `MasterCard`; other values return `400 ErrorGeneral` |
+| `product` | string | Conditional | A product from `GET /api/v3/cards/config` |
+| `product_type` | string | Conditional | `Debit` or `Credit`, the product's `product_type` |
+| `payment_system` | string | Conditional | `Visa` or `MasterCard`, the product's `payment_system` |
+| `design` | string | Conditional | One of the product's `designs` |
+| `card_program` | string | Conditional | One of the product's `card_programs` (carries cash-withdrawal terms) |
 | `card_wallet_address` | string | Conditional | Required when the order resolves to Bridge, rejected when it resolves to Visa, always rejected for metal |
+
+**Product selection is all or none.** Send all five of `product`, `product_type`, `payment_system`, `design` and `card_program` from one product entry, or none of them for the issuer's defaults. Naming only some returns `400 ErrorMissingField` (one `error_details` entry per missing field); a combination the issuer does not offer returns `400 "Request failed due to external validation failure"`; a priced order without the fee invoice's `delivery_id` returns `400 ErrorGeneral` ("This card order is priced above zero and must carry the delivery returned by the fees invoice endpoint"). Per the API reference, with provider Bridge `product`, `product_type` and `card_program` are rejected and `design` / `payment_system` are optional.
 
 Rail resolution: Visa is tried first (`VisaVirtualCard`/`VisaPlasticCard` `Active`); the order resolves to Bridge only if the Bridge capability is `Active` and Visa is not. Sending `card_wallet_address` does not request Bridge.
 
@@ -300,6 +306,7 @@ Requested -> NotActivated -> Active <-> Blocked -> Closed
 | Close | `Active`, `Blocked` | `Requested`/`NotActivated`: `Card status does not allow closing`; `Closed`: `Card is already closed` |
 | Change limit | `Active` | `Card status does not allow limit changes` |
 | Get details, CVV, PIN | `Active` | `Card is not active` |
+| Reissue | `NotActivated`, `Active`, `Blocked` (by the user), once the card is old enough | See [Reissue a Card](#reissue-a-card) |
 | Change name | any status | -- |
 
 Refusals are `400 ErrorInvalidStatus` and name the action in `error_details`.
@@ -342,6 +349,47 @@ PUT /api/v1/cards/{cardId}/name
 ```
 
 `name` must match `^[a-zA-Z0-9\-':+# @]{1,50}$`. Response `200 {}`. Changes only `card_data.card_name`; `name_on_card` is embossed at issuance and cannot be changed.
+
+### Reissue a Card
+
+> The guide marks reissue as **in active testing**: its request, response and behavior may change before it is final.
+
+Replaces a lost, stolen, damaged or expiring card with a new card (own `id`) on the same format, rail, funding wallet, chain and payment system. v3 only; works for any card whose `allowed_actions` lists `Reissue`, whichever version issued it. If the reissue is priced for the user, first create the v2 fee invoice for the card's format (`POST /api/v2/cards/{type}/fees/{country}/payment`) and keep its `delivery_id`; if the fee lookup answers "You have no card order/delivery fees to pay", skip it.
+
+```
+POST /api/v3/cards/{cardId}/reissue
+```
+
+```json
+{
+  "reason": "Damaged",
+  "delivery_id": 12345,
+  "delivery_provider": "DHL",
+  "delivery_address": { "line1": "10 Downing Street", "city": "London", "zip_code": "SW1A 2AA", "country": "GB" }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `reason` | string | Yes | `Expiration`, `Damaged`, `LostOrStolen` or `UpdateProduct` (move to a different `card_program`) |
+| `delivery_address` | object | Conditional | Required for plastic/metal, refused for virtual |
+| `delivery_provider` | string | Conditional | Plastic/metal only. Required when fees are enforced for your company, otherwise defaults to `DHL` |
+| `delivery_id` | integer | No | From the fee invoice, for a priced reissue. The API does not refuse a reissue without it |
+| `card_program` | string | No | From `GET /api/v3/cards/config`; omitted, the old card's program is kept |
+
+Response `200`: `{ "id": "<replacement card id>" }`. A virtual replacement is `Active` immediately; a plastic/metal replacement is `NotActivated` and ships to `delivery_address`.
+
+Eligibility: status `NotActivated`, `Active`, or `Blocked` by the user (a card blocked by Wirex cannot be reissued, contact Wirex support); card age at least 6 months, 6 minutes in sandbox.
+
+| Old card | Becomes `Closed` |
+|----------|------------------|
+| Virtual, any reason | When the replacement is issued |
+| Plastic or metal, `Damaged` | When the user activates the replacement |
+| Plastic or metal, `LostOrStolen` | **Not automatically**: block it first with `PUT /api/v1/cards/{cardId}/block` (a card the user blocked can still be reissued) |
+
+Card status webhooks arrive for the replacement and, when it closes, for the old card; nothing in the payload links the two, keep the mapping from the reissue response.
+
+Errors (all `400`, `CategoryValidationFailure`): `ErrorMissingField` / `ErrorGeneral` for `reason` (missing, or not one of the four); `ErrorNotYetValid` "Card can be reissued 6 months after it was created" with `reissuable_from`; `ErrorInvalidStatus` "Card status does not allow reissue" (`Requested`, `Closed`) or "Card status was set by system, contact support to reissue"; `ErrorMissingField` `delivery_address` (physical card) or `delivery_provider` (fees enforced); `ErrorGeneral` `delivery_address` on a virtual card; `ErrorNotFound` "Card not found"; `ErrorGeneral` "Request failed due to external validation failure" (issuer refused, e.g. unknown `card_program`).
 
 ---
 
@@ -404,9 +452,9 @@ Errors: `ErrorMissingField` (`code`, `session_id`), `ErrorInvalidField` (`sessio
 
 ## Secure Card Details Retrieval
 
-All three endpoints take `{ "action_token": "..." }` in the body and require the card to be `Active`. Token: valid 5 minutes, single use; the docs table also says the same token works for PAN, CVV and PIN (the docs are ambiguous on reuse).
+All three endpoints take `{ "action_token": "..." }` in the body and require the card to be `Active`. Token: valid 5 minutes, reusable across PAN, CVV and PIN (the same token works for all three); mint a fresh one each time the user opens the card details view.
 
-> Call these directly from the client app; proxying cardholder data through your backend is permitted only if the backend is PCI DSS compliant. In browsers, the PCI Compliant SDK `@wirexapp/card-reveal-web` (docs page `retail-pci-sdk-reveal`) renders the values inside Wirex-served iframes so they never reach your page.
+> Call these directly from the client app; proxying cardholder data through your backend is permitted only if the backend is PCI DSS compliant. Recommended: the PCI Compliant SDK (skill `wirex-baas-pci-sdk`) reveals the values inside Wirex-controlled views so they never reach your app: Web `@wirexapp/card-reveal-web` (docs `retail-pci-sdk-web-reveal`), React Native `@wirexapp/mobile-sdk`, Flutter `wirex_mobile_sdk`, iOS `WirexMobileSDK`, Android `com.wirexapp.baas:mobile-sdk`. You still mint the `action_token` and pass it to the SDK.
 
 ### Get PAN and Expiry
 
@@ -414,7 +462,7 @@ All three endpoints take `{ "action_token": "..." }` in the body and require the
 POST /api/v1/cards/{cardId}/details
 ```
 
-Response: `{ "card_number": "4111111111111234", "expiry_date": "12/27" }`
+Response: `{ "card_number": "4111111111111234", "expiry_date": "12/2027" }`
 
 ### Get CVV
 
@@ -442,6 +490,7 @@ Response: `{ "pin": "1234" }`. Physical cards only (`ErrorNotSupported`, `card_f
 | `ErrorInvalidField` | `action_token: invalid_purpose` | Issued for a different action type |
 | `ErrorMissingField` | `action_token: missing` | Not provided |
 | `ErrorInvalidStatus` | `card_status: not_active` | Card is not `Active` |
+| `ErrorUpstreamRejected` | `AuthTokenIsInvalid` | The action token was not issued to this user; mint a new one |
 
 ### Example: Retrieve Details with a Wallet Signature
 
@@ -570,7 +619,7 @@ GET {pci_base_url}/b2b/cards/topup?user_id={user_id}
 DELETE {pci_base_url}/b2b/cards/topup/{card_id}?user_id={user_id}
 ```
 
-Register body: `{ "card": { "name", "expiry_month", "expiry_year", "number", "cvv", "billing_details": { "address_line1", "address_line2"?, "postal_code", "country", "city", "state"? }, "label" } }` -> `{ "card_id", "card_label" }`. Only Visa and Mastercard; error code `0243` = card already linked to another Wirex account. In browsers use `@wirexapp/card-topup-web` (docs `retail-pci-sdk-topup-collect`) so PAN/CVV never enter your page.
+Register body: `{ "card": { "name", "expiry_month", "expiry_year", "number", "cvv", "billing_details": { "address_line1", "address_line2"?, "postal_code", "country", "city", "state"? }, "label" } }` -> `{ "card_id", "card_label" }`. Only Visa and Mastercard; error code `0243` = card already linked to another Wirex account. Recommended: the PCI Compliant SDK (skill `wirex-baas-pci-sdk`) performs this registration inside Wirex-controlled views and returns the same `card_id`, so PAN/CVV never reach your app: Web `@wirexapp/card-topup-web` (docs `retail-pci-sdk-web-topup-collect`), React Native `@wirexapp/mobile-sdk`, Flutter `wirex_mobile_sdk`, iOS `WirexMobileSDK`, Android `com.wirexapp.baas:mobile-sdk`. Call the endpoints above directly only from a PCI DSS compliant environment.
 
 ### Estimate
 
@@ -587,7 +636,7 @@ POST /api/v1/cards/topup/estimate
 }
 ```
 
-`external_card_id` is required for `external_card` (default) and rejected for `apple_pay`/`google_pay`. `destination_amount` is an integer string in token base units. Response: `estimation_id`, `expires_at` (Unix seconds), `source_amount`, `source_amount_precise`, `source_currency`, `destination_amount`, `destination_amount_precise`, `destination_token_address`, `destination_token_symbol`, `fee_amount`, `fee_amount_precise`, `fee_currency`, `rate`, `provider`.
+`external_card_id` is required for `external_card` (default) and rejected for `apple_pay`/`google_pay`. `destination_amount` is an integer string in token base units. Response: `estimation_id`, `expires_at` (Unix seconds), `source_amount`, `source_amount_precise`, `source_currency`, `destination_amount`, `destination_amount_precise`, `destination_token_address`, `destination_token_symbol`, `fee_amount`, `fee_amount_precise`, `fee_currency`, `rate`, `rate_precise` (scaled by `rate_decimals`), `rate_decimals`, `provider` (identifier of the acquirer the top-up is routed to; informational, do not branch on its value).
 
 ### Execute
 
@@ -595,7 +644,9 @@ POST /api/v1/cards/topup/estimate
 POST /api/v1/cards/topup/execute
 ```
 
-Body: `estimation_id` (required), `device_id` (optional). For a wallet-method estimation also `wallet_payment_token` (max 16384 chars), `cardholder_name`, `billing_address` (`country_code`, `city`, `postal_code`, `address_line1` required; `state`, `address_line2` optional) and optional `wallet_transaction_id` (max 128); these are rejected for an `external_card` estimation. Response: `id`, `status`, optional `three_ds_state` (`flow` `frictionless`|`challenge`, `provider`, `status`, `status_reason`, `url`). For `challenge`, open `url`; for `frictionless` no action.
+Body: `estimation_id` (required), `device_id` (optional). For a wallet-method estimation also `wallet_payment_token` (max 16384 chars), `cardholder_name`, `billing_address` (`country_code`, `city`, `postal_code`, `address_line1` required; `state`, `address_line2` optional) and optional `wallet_transaction_id` (max 128); these are rejected for an `external_card` estimation. Response: `id`, `status`, optional `three_ds_state` (`flow`, `provider`, `status`, `status_reason`, `url`). `flow` is `Unknown` at execute (decided after the device check on the 3DS page): load `url` on the cardholder's device whenever it is present, through the PCI SDK 3DS surface or a browser/web view; the page completes frictionless or shows the challenge, and a top-up whose page is never loaded stays `Pending`. No `three_ds_state` = no 3DS step.
+
+Restricted top-up token: `POST /api/v1/cards/topup/token` with the user token (no body) -> `{ "access_token", "expires_at" }`. Accepted only by `POST /api/v1/cards/topup/estimate` and `/execute`; valid 15 minutes; mint one per armed quote; `401` if the user token is missing/invalid/expired or an S2S token is used, and `401 Token is not allowed for this endpoint` if sent elsewhere. Used as `checkoutToken` by the mobile SDKs' wallet checkout (token mode).
 
 Completion webhook: `POST /v2/webhooks/activities` with `type: CardTopup`, `direction: Inbound`, `source.type: ExternalCard`, steps `Initiated`, `CardIn`, `Review`, `CryptoIn` (`Reversal` if reversed). Errors: `ErrorNotFound` `estimation_id` (not found or expired), `ErrorInvalidField` `payment_method`, plus field-level `ErrorMissingField`/`ErrorInvalidField`.
 
@@ -679,7 +730,9 @@ The OTP-by-SMS method needs no partner calls.
 
 - Card status `POST /v2/webhooks/cards`: same structure as a `GET /api/v1/cards` item (`id`, `card_wallet_address`, `status`, `status_reason`, `previous_status`, `generation`, `provider`, `limit`, `allowed_actions`, `card_data`, `created_at`, `updated_at`; plus `correlation_id`, `chain_id`, precise limit fields, and `funding_token`/`issuer_spender_address` on Bridge cards).
 - Card limits `POST /v2/webhooks/card-limits`: see [Limit Webhook](#limit-webhook).
-- Activities `POST /v2/webhooks/activities`: `type: CardTransaction` (`direction` `Outbound` debit / `Inbound` credit; `status` `Pending`/`Completed`/`Failed`; `status_reason` e.g. `InsufficientFunds`, `DailySpendAmountIsExceeded`, `GeneralError`; `source_amount`/`destination_amount` are always positive; `operations[].operation_amount` is negative for debits and positive for credits; `activity_steps[]`). Debit steps `Initiated`, `CryptoOut`, `CardOut`, `Completed`, `Reversal`; credit steps `Initiated`, `CardIn`, `CryptoIn`, `Completed`. Crypto amounts may be `0` or missing until the crypto step executes.
+- Activities `POST /v2/webhooks/activities`: `type: CardTransaction` (`direction` `Outbound` debit / `Inbound` credit; `status` `Pending`/`Completed`/`Failed`; `status_reason` e.g. `InsufficientFunds`, `DailySpendAmountIsExceeded`, `ChainRejected`, `GeneralError`, `BroadcastFailed`; `source_amount`/`destination_amount` are always positive; `fee_amount` (card fee, absent when zero, not folded into `rate`) and `rrn` (card network reference); `operations[]` carry `operation_id`, `status`, `operation_reason`, `operation_amount` and `transaction_amount` (both negative for debits, positive for credits), `resulting_balance`, `rate`, `hash`; `activity_steps[]`). Debit steps `Initiated`, `CryptoOut`, `CardOut`, `Completed`, `Reversal`; credit steps `Initiated`, `CardIn`, `CryptoIn`, `Completed`. Crypto amounts may be `0` or missing until the crypto step executes.
+
+Operation fields: `operation_id` is stable across webhooks (key bookings on it); `status` is `Pending`/`Completed`/`Failed` and moves only forward; `operation_reason` is `Authorization`, `Clearing`, `Reversal`, `Refund`, `Representment`, `MoneySend`, `CreditAdjustment`, `DebitAdjustment`, `ChargebackRefund` or `ChargebackReversal`; `hash` is the on-chain hash only once `Completed` (while `Pending` it is an interim value, not an identifier); `resulting_balance` is reliable once `Completed` (can read `0` while `Pending`). Every amount has `amount` (display), `amount_precise` (exact, string) and `decimals`: use `amount_precise` for accounting. Each webhook repeats all operations of the transaction; a clearing, refund or reversal is a new operation. Activity `status`: `Pending` until the debit settles; `Completed` (a partially refunded purchase stays `Completed`); `Failed` (declined, or refunded/reversed in full; there is no `Cancelled`). Deduplicate on each operation's `operation_id` + `status`.
 - 3DS `POST /v2/webhooks/3ds`: see above.
 
 See [wirex-baas-webhooks reference](../../wirex-baas-webhooks/references/REFERENCE.md) for complete payloads.
@@ -706,10 +759,13 @@ Error format:
 | 400 | `ErrorInvalidStatus` | Action not allowed in the card's current status |
 | 400 | `ErrorNotSupported` | e.g. PIN on a non-physical card |
 | 400 | `ErrorNotFound` | No delivery methods/fees for country; no active 3DS request; card not found |
-| 400 | `ErrorGeneral` | `Delivery ID is required and must be positive`; `Card fees are not enforced`; invalid `payment_system` |
+| 400 | `ErrorGeneral` | `Delivery ID is required and must be positive`; invalid `payment_system`; `Capability is not active`; v3 priced order without `delivery_id` |
+| 400 | `ErrorNotSupported` | "You have no card order/delivery fees to pay" (fees not enforced for your company) |
+| 400 | `ErrorNotYetValid` | Reissue before the card is old enough (`reissuable_from` in `error_details`) |
 | 400 | `ErrorExpired` | Expired `action_token` |
 | 500 | `ErrorGeneral` | `Failed to issue virtual card` / `Failed to issue plastic card` / `Failed to activate card` / `Failed to get card` / `Failed to process delivery payment` |
-| 500 | `ErrorGeneral` | `Virtual card capability is not active` (`CategoryInternalFailure`) -- a precondition failure, not transient; check capabilities before issuing |
+
+`Capability is not active` (`400`, `CategoryValidationFailure`) is returned by every issue endpoint when the user's capability for the format is not `Active`: re-read the capability rather than retrying.
 
 ---
 
@@ -718,13 +774,13 @@ Error format:
 | Field | Validation |
 |-------|-----------|
 | `card_name` / change-name `name` | `^[a-zA-Z0-9\-':+# @]{1,50}$` |
-| `name_on_card` | Published rule `^[A-Za-z][A-Za-z .'-]{1,25}$` (2-26 chars, starts with a letter); not enforced by the API per the validation-rules guide, the card processor may still reject (`400 "Request failed due to external validation failure"`) |
+| `name_on_card` | No pattern check; ignored on v1/v2 (the card carries the KYC name); on v3 printed uppercased and the card issuer may reject it (`400 "Request failed due to external validation failure"`). Do not rely on the published `nameOnCard` rule |
 | `card_number_last4` | Exactly 4 digits |
 | `expiry_date` (activation) | `MM/YYYY` |
 | `delivery_address.*` | See [Address Fields](#address-fields) |
 | `{type}` (fees/invoice) | `virtual`, `plastic`, `metal` (case-insensitive) |
 | `payment_system` (v3) | `Visa` or `MasterCard` |
 | `limit` values | Number; `-1` disables, `0` blocks all spending |
-| `action_token` | Valid 5 minutes, single use |
+| `action_token` | Valid 5 minutes; reusable across PAN, CVV and PIN |
 | `nonce` | Unix seconds, valid 5 minutes |
 | `session_id` | UUID |

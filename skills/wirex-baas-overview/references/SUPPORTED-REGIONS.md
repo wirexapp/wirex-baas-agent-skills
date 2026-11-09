@@ -4,7 +4,7 @@ Countries supported by Wirex BaaS, organized by region, with ISO 3166-1 alpha-2 
 
 ---
 
-## Europe (35 Countries)
+## Europe (37 Countries)
 
 | Country | ISO Code | Cards | SEPA | ACH |
 |---|---|---|---|---|
@@ -27,6 +27,7 @@ Countries supported by Wirex BaaS, organized by region, with ISO 3166-1 alpha-2 
 | Ireland | IE | Yes | Yes | Yes |
 | Italy | IT | Yes | Yes | Yes |
 | Latvia | LV | Yes | Yes | Yes |
+| Liechtenstein | LI | Yes | No | No |
 | Lithuania | LT | Yes | Yes | Yes |
 | Luxembourg | LU | Yes | Yes | Yes |
 | Malta | MT | Yes | Yes | Yes |
@@ -37,6 +38,7 @@ Countries supported by Wirex BaaS, organized by region, with ISO 3166-1 alpha-2 
 | Poland | PL | Yes | Yes | Yes |
 | Portugal | PT | Yes | Yes | Yes |
 | Romania | RO | Yes | Yes | Yes |
+| San Marino | SM | Yes | No | No |
 | Slovakia | SK | Yes | Yes | Yes |
 | Slovenia | SI | Yes | Yes | No |
 | Spain | ES | Yes | Yes | Yes |
@@ -46,19 +48,21 @@ Countries supported by Wirex BaaS, organized by region, with ISO 3166-1 alpha-2 
 
 ---
 
-## Asia-Pacific (5 Countries)
+## Asia-Pacific (7 Countries)
 
 | Country | ISO Code | Cards | SEPA | ACH |
 |---|---|---|---|---|
 | Australia | AU | Yes | No | Yes |
+| Hong Kong | HK | Yes | No | Yes |
 | Malaysia | MY | Yes | No | Yes |
+| New Zealand | NZ | Yes | No | No |
 | Philippines | PH | Yes | No | No |
 | Taiwan | TW | Yes | No | Yes |
 | Thailand | TH | Yes | No | Yes |
 
 ---
 
-## Latin America (7 Countries)
+## Latin America (9 Countries)
 
 | Country | ISO Code | Cards | SEPA | ACH |
 |---|---|---|---|---|
@@ -67,18 +71,19 @@ Countries supported by Wirex BaaS, organized by region, with ISO 3166-1 alpha-2 
 | Chile | CL | Yes | No | Yes |
 | Colombia | CO | Yes | No | Yes |
 | Ecuador | EC | Yes | No | No |
+| El Salvador | SV | Yes | No | No |
 | Mexico | MX | Yes | No | Yes |
+| Panama | PA | Yes | No | No |
 | Peru | PE | Yes | No | Yes |
 
 ---
 
-## Rest of the World (21 Countries)
+## Rest of the World (19 Countries)
 
 | Country | ISO Code | Cards | SEPA | ACH |
 |---|---|---|---|---|
 | Azerbaijan | AZ | Yes | No | No |
 | Bahrein | BH | Yes | No | No |
-| El Salvador | SV | Yes | No | No |
 | Georgia | GE | Yes | No | No |
 | Ghana | GH | Yes | No | No |
 | Guernsey | GG | Yes | No | No |
@@ -90,7 +95,6 @@ Countries supported by Wirex BaaS, organized by region, with ISO 3166-1 alpha-2 
 | Macao | MO | Yes | No | No |
 | Moldova | MD | Yes | No | No |
 | Nigeria | NG | Yes | No | No |
-| Panama | PA | Yes | No | No |
 | South Africa | ZA | Yes | No | No |
 | South Korea | KR | Yes | No | No |
 | Uganda | UG | Yes | No | No |
@@ -100,19 +104,18 @@ Countries supported by Wirex BaaS, organized by region, with ISO 3166-1 alpha-2 
 
 ---
 
-## Bank Accounts Only (no card services) (5 Countries)
+## Bank Accounts Only (no card services) (4 Countries)
 
 These countries appear in the ACH availability list but not in the card Supported Countries list.
 
 | Country | ISO Code | Cards | SEPA | ACH |
 |---|---|---|---|---|
-| Hong Kong | HK | No | No | Yes |
 | Indonesia | ID | No | No | Yes |
 | Singapore | SG | No | No | Yes |
 | United States | US | No | No | Yes |
 | Vietnam | VN | No | No | Yes |
 
-ACH accounts support all US states and territories.
+USD accounts (ACH and Fedwire) are supported in all US states and territories except Texas (TX) and New York (NY); users resident in these two states cannot open a USD account.
 
 ---
 

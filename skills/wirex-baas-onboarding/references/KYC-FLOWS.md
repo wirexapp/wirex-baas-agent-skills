@@ -10,7 +10,7 @@ Wirex supports **only one verification flow at a time**; changing the configured
 | `SDD` | Standard Due Diligence | PoI + PoA + selfie | Bank accounts, cards, standard transfers; higher spending limits |
 | `EDD` | Enhanced Due Diligence | Additional documentation | Higher limits, additional features |
 
-PoI = Proof of Identity, PoA = Proof of Address. The API enum for `verification_level` is `N/A`, `BDD`, `SDD`, `XDDBridge`, `EDD`.
+PoI = Proof of Identity, PoA = Proof of Address. The API enum for `verification_level` is `N/A`, `BDD`, `SDD`, `XDDBridgeBase`, `EDD` (`XDDBridgeBase` = `SDD` plus tax identification number; required for ACH accounts; an omitted or unrecognised value falls back to `SDD`). Accepted PoI documents by issuing country: [Supported Identity Documents](https://docs.wirexapp.com/docs/retail-kyc-supported-id-documents); accepted PoA documents: [Supported Proof of Address Documents](https://docs.wirexapp.com/docs/retail-kyc-supported-poa-documents).
 
 ---
 
@@ -50,9 +50,9 @@ X-Chain-Id: {chainId}
 
 `user_address` replaces the former `wallet_address` (both accepted; if both are supplied they must match). Response: `{ "id": "<user uuid>" }`.
 
-Privy variant: `POST /api/v1/user/retail` with `Authorization: Bearer {privy_access_token}`, `Identity: Bearer {privy_identity_token}`, `X-Chain-Id`, body `{ "country": "GB" }` (optional `referrer_address`).
+Privy variant: `POST /api/v1/user/retail` with `Authorization: Bearer {privy_access_token}`, `Identity: Bearer {privy_identity_token}`, `X-Chain-Id`, body `{ "country": "GB" }` (optional `referrer_address`; `country` omitted defaults to the country of the caller's IP address; email and wallet come from the Privy identity token).
 
-> **Docs inconsistency:** the API reference schema for `POST /api/v2/user` lists `initial_data.is_pep`, every `profile` field and `residence_address` city/country/line1/post_code as required; the Hosted KYC guide (followed here) registers with only email + country. The guide's Privy example also sends `email`, while the reference body has only `country` and `referrer_address`.
+> **Docs inconsistency:** the API reference schema for `POST /api/v2/user` lists `initial_data.is_pep`, every `profile` field and `residence_address` city/country/line1/post_code as required; the Hosted KYC guide (followed here) registers with only email + country.
 
 ### Step 2: Get Verification Link
 
@@ -75,8 +75,6 @@ Optional body: `{ "verification_level": "SDD" }`.
 
 Open the URL in a browser or webview; the user completes verification in the hosted SumSub widget.
 
-> **Docs inconsistency:** the Hosted KYC guide shows the response field as `url`; the API reference defines `redirect_uri` (used here).
-
 ### Step 2 (Alternative): Get Verification Token
 
 To embed the SumSub Web/Mobile SDK in your own UI:
@@ -96,13 +94,13 @@ Content-Type: application/json
 }
 ```
 
-Use this token to initialize the SumSub SDK (see the SumSub SDK documentation).
+Use this token to initialize the SumSub SDK (see the SumSub SDK documentation). To brand the WebSDK, Wirex sets up a customization in the SumSub dashboard and sends you a name to pass as `customizationName` in `withConf` (WebSDK 2.x only; not available for the verification-link flow); see [Hosted KYC, WebSDK Customization](https://docs.wirexapp.com/docs/retail-kyc-hosted#websdk-customization).
 
 With an S2S token, user identity headers apply: exactly one of `X-User-Wallet` (the EOA, not the Smart Wallet), `X-User-Email`, `X-User-Id`.
 
 ### Step 3: Wait for the result
 
-User completes KYC -> SumSub sends the result to Wirex -> Wirex sends a webhook with the updated verification status (`/v2/webhooks/user`, or legacy `/webhook/users`) and activates the account. Restricted operations (card issuance, fiat withdrawals) stay unavailable until KYC is approved.
+User completes KYC -> SumSub sends the result to Wirex -> Wirex sends a webhook with the updated verification status (`/v2/webhooks/user`, or legacy `/webhook/users`; the v2 payload has no `capabilities`) and activates the account. Restricted operations (card issuance, fiat withdrawals) stay unavailable until KYC is approved.
 
 The phone number the user enters in the SumSub form is stored on the profile and **automatically marked as confirmed**.
 
@@ -160,7 +158,7 @@ For partners whose users are already verified via SumSub. The partner shares the
 
 **Applicant data (required unless noted):** first name, last name, date of birth, nationality, phone, country, city, street, building number, postcode; state and street line 2 are optional.
 
-**Documents:** selfie (liveness check, required); Proof of Identity (required; ask your Wirex account manager for accepted document types per country; must have more than 1 month of validity left); Proof of Address (required; issued within the last 6 months). User age: 18-90.
+**Documents:** selfie (liveness check, required); Proof of Identity (required; accepted document types per country: [Supported Identity Documents](https://docs.wirexapp.com/docs/retail-kyc-supported-id-documents); must have more than 1 month of validity left); Proof of Address (required; issued within the last 6 months, see [Supported Proof of Address Documents](https://docs.wirexapp.com/docs/retail-kyc-supported-poa-documents)). User age: 18-90.
 
 **Questionnaire:** the applicant must have a completed SumSub questionnaire, `onboarding_survey_baas_v1`. Get it from your Wirex account manager, add it to your SumSub verification level, and keep section IDs, item IDs and option values unchanged -- Wirex reads answers by value. Instead of pre-filling it on the applicant, you can submit it via the Wirex API after registration -- see [Submitting the Questionnaire via API](#submitting-the-questionnaire-via-api).
 
@@ -296,7 +294,7 @@ Fields (all four are required in the API reference):
 | `document_country` | ISO 3166-1 alpha-2 | Issuing country of the document |
 | `side` | `front`, `back`, `none` | Which side of the document |
 
-The KYC Sharing guide lists the required documents as selfie, proof of identity (passport / national ID / driver's license) and proof of address (utility bill / bank statement).
+The KYC Sharing guide lists the required documents as selfie, proof of identity (passport / national ID / driver's license) and proof of address (utility bill / bank statement). Accepted documents: [Supported Identity Documents](https://docs.wirexapp.com/docs/retail-kyc-supported-id-documents) (PoI, by issuing country) and [Supported Proof of Address Documents](https://docs.wirexapp.com/docs/retail-kyc-supported-poa-documents) (PoA).
 
 > **Docs inconsistency:** the guide names the types `selfie`, `poi`, `poa`, and its error table lists `selfie` as a valid `document_type`; the API reference enum has no `selfie`, `poi` or `poa` (values above are from the reference).
 
@@ -413,7 +411,7 @@ Enforced patterns are listed in the Field Validation Rules page and published at
 
 | Field | Type | Required | Validation | Example |
 |-------|------|----------|------------|---------|
-| `user_address` | string | Yes | `^0x[a-fA-F0-9]{40}$` (EVM) — must be EOA, NOT Smart Wallet | `"0xAbC123...def"` |
+| `user_address` | string | Yes | EVM `0x` + 40 hex, Stellar `G…`/`C…`, XRPL `r…` or Tron `T…` — must be EOA, NOT Smart Wallet | `"0xAbC123...def"` |
 | `initial_data.profile.email` | string | Yes | Valid email, unique | `"user@example.com"` |
 | `initial_data.residence_address.country` | string | Yes | ISO 3166-1 alpha-2 (`^[A-Z]{2}$`) | `"GB"` |
 | `initial_data.profile.first_name` | string | API flow only | `^[a-zA-Z][a-zA-Z\-' ]{1,50}$` (unaccented Latin only) | `"Jane"` |
@@ -439,7 +437,7 @@ Enforced patterns are listed in the Field Validation Rules page and published at
 
 | Error Reason | Field | Description |
 |-------------|-------|-------------|
-| `ErrorInvalidField` | `user_address` | Invalid format (must be `^0x[a-fA-F0-9]{40}$` for EVM) |
+| `ErrorInvalidField` | `user_address` | Invalid format (EVM `0x` + 40 hex, Stellar `G…`/`C…`, XRPL `r…` or Tron `T…`) |
 | `ErrorInvalidField` | `email` | Invalid email format |
 | `ErrorInvalidField` | `country` | Invalid ISO 3166-1 alpha-2 code |
 | `ErrorInvalidField` | `sharing_token` | Invalid or expired SumSub sharing token |
@@ -448,6 +446,8 @@ Enforced patterns are listed in the Field Validation Rules page and published at
 | `ErrorAlreadyExists` | wallet address | A user with this wallet already exists |
 
 Providing both `sharing_data` and `initial_data` fails validation (mutually exclusive).
+
+> The Hosted, Shared and API guides now show request validation failures on `POST /api/v2/user` as `ErrorGeneral` `Request failed validation`, with the field path as the `error_details` key (see the example under Error Handling); the `ErrorInvalidField` rows above are the older wording.
 
 ---
 
@@ -530,10 +530,10 @@ Response: `{}`.
 | `Pending` | Verification checks being executed on Wirex side |
 | `InReview` | Verification checks being executed on Wirex side |
 | `Approved` | Verification approved — user is ready to use all features |
-| `Canceled` | Verification was rejected — contact Wirex support |
+| `Canceled` | Verification was cancelled — contact Wirex support |
 | `Rejected` | Verification was rejected — contact Wirex support |
 
-> **Docs inconsistency:** the KYC overview page lists `NotStarted`, `Applied`, `InReview`, `Approved`, `Rejected`; the User Information page spells the cancelled status `Cancelled`. The API reference enum above (`None`, `Canceled`, …) is used. The docs do not publish a status transition diagram.
+> **Docs inconsistency:** the KYC overview and User Information pages now list `None`, `Applied`, `InReview`, `Approved`, `Rejected`, `Canceled` (one `l`) and omit `Pending`, which stays in the API reference enum above. The docs do not publish a status transition diagram.
 
 ---
 
@@ -543,15 +543,14 @@ All errors follow the standard format:
 
 ```json
 {
-  "error_reason": "ErrorInvalidField",
-  "error_description": "Invalid format for email",
+  "error_reason": "ErrorGeneral",
+  "error_description": "Request failed validation",
   "error_category": {
     "category": "CategoryValidationFailure",
     "http_status_code": 400
   },
   "error_details": [
-    { "key": "field", "details": "email" },
-    { "key": "issue", "details": "invalid_format" }
+    { "key": "initial_data.profile.email", "details": "Email is invalid or missing" }
   ]
 }
 ```

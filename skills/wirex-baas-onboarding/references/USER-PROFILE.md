@@ -95,7 +95,7 @@ The docs list these four values (`Active`, `Pending`, `Blocked`, `Deleted`) with
 | `SDD` | Standard Due Diligence | PoI + PoA + selfie | Bank accounts, cards, standard transfers; higher spending limits |
 | `EDD` | Enhanced Due Diligence | Additional documentation | Higher limits, additional features |
 
-PoI = Proof of Identity, PoA = Proof of Address. The API enum (`verification.levels[].type`, `verification_requirements[].type`) is `N/A`, `BDD`, `SDD`, `XDDBridge`, `EDD`. Each entry in `verification.levels` has `type`, `status` (`Pending`, `Approved`, `Rejected`, …) and a human-readable `name`.
+PoI = Proof of Identity, PoA = Proof of Address. The API enum (`verification.levels[].type`, `verification_requirements[].type`) is `N/A`, `BDD`, `SDD`, `XDDBridgeBase`, `EDD`. Each entry in `verification.levels` has `type`, `status` (`Pending`, `Approved`, `Rejected`, …) and a human-readable `name`.
 
 ---
 
@@ -135,6 +135,8 @@ Capabilities are the **feature-gating mechanism** in Wirex BaaS. Each capability
 | `NotFulfilled` | Requirements not met | Complete KYC or prerequisites |
 | `NotRequired` | Present in the API reference enum; not described in the guides | — |
 | `NotAvailable` | Not available for this user | Cannot be activated |
+| `ExternalProviderRegistrationPending` | An external provider is still onboarding the user | Wait; the capability moves on its own |
+| `ExternalProviderVerificationRequired` | Wallet ownership must be verified with the external provider | Complete the provider's wallet verification |
 
 Typical flow: `NotFulfilled` → `ActivationNotStarted` → `InProgress` → `Active`.
 
@@ -150,11 +152,11 @@ Bank account capabilities require KYC verification before activation. Example: `
 |-----------|-------------|
 | `VisaVirtualCard` | Issue virtual Visa cards |
 | `VisaPlasticCard` | Issue physical Visa cards |
-| `VisaMetalCard` | Metal Visa cards (listed in the API reference enum) |
+| `VisaMetalCard` | Issue metal Visa cards |
 | `BridgeVirtualCard` | Virtual cards on the Bridge rail; resolved only where `VisaVirtualCard` is not active |
 | `BridgePlasticCard` | Physical cards on the Bridge rail; resolved only where `VisaPlasticCard` is not active |
 | `CardTransfer` | Push to card transfers |
-| `CardTopup` | Card top-up (listed in the API reference enum) |
+| `CardTopup` | Top up the wallet from a payment card |
 | `WalletTopup` | Top up from a device payment sheet (Apple Pay / Google Pay), separate from `CardTopup` (documented in the Capabilities guide) |
 
 ### SEPA Banking (Europe)
@@ -164,6 +166,8 @@ Bank account capabilities require KYC verification before activation. Example: `
 ### ACH Banking (United States)
 
 `AchAccount`, `AchIn1stParty`, `AchIn3rdParty`, `AchOut1stParty`, `AchOut3rdParty`.
+
+USD accounts support both ACH and Fedwire. ACH and Fedwire are supported in all US states and territories except Texas (TX) and New York (NY): users resident there cannot open a USD account ([Bank Account Availability](https://docs.wirexapp.com/docs/bank-account-availability)). Activation: `POST /api/v1/bank/accounts` ([Capabilities guide](https://docs.wirexapp.com/docs/retail-capabilities)).
 
 ### Faster Payments (United Kingdom)
 
@@ -179,6 +183,9 @@ Bank account capabilities require KYC verification before activation. Example: `
 |-----------|--------|-------------|
 | `PixOut3rdParty` | Brazil | Send Pix transfers |
 | `FpsHkOut3rdParty` | Hong Kong | Send FPS HK transfers |
+| `ChatsOut3rdParty` | Hong Kong | Send CHATS transfers |
+| `CipsOut3rdParty` | China | Send CIPS transfers |
+| `SwiftOut3rdParty` | — | Send SWIFT transfers |
 | `ImpsOut3rdParty` | India | Send IMPS transfers |
 | `InstapayOut3rdParty` | Philippines | Send InstaPay transfers |
 | `BiFastOut3rdParty` | Indonesia | Send BI-FAST transfers |
@@ -186,7 +193,7 @@ Bank account capabilities require KYC verification before activation. Example: `
 | `IppOut3rdParty` | Thailand | Send IPP transfers |
 | `PseOut3rdParty` | Colombia | Send PSE transfers |
 
-The API reference enum also contains `FedwireOut3rdParty`, `SwiftOut3rdParty`, `CipsOut3rdParty`, `ChatsOut3rdParty`, `CpnExternalProfile`, `TripleAExternalProfile`, `SavingsAccount` and `Loan`, which the retail guides do not describe. `StableExchange` is described in the FX guide: it must be `Active` on the user for FX (users without it are refused on both FX endpoints).
+The API reference enum also contains `FedwireOut3rdParty`, `CpnExternalProfile`, `TripleAExternalProfile`, `SavingsAccount` and `Loan`, which the retail guides do not describe. `StableExchange` is described in the FX guide: it must be `Active` on the user for FX (users without it are refused on both FX endpoints).
 
 ---
 
@@ -285,6 +292,8 @@ async function buildFeatureMenu(userToken, userEoaAddress) {
 | `verification` | object | KYC verification status, levels and documents |
 | `external_providers` | array | Linked external service providers |
 | `capabilities` | array | List of capability objects |
+| `last_login_ip` | string | IP address of the user's last non-S2S login; omitted until one is recorded |
+| `tags` | array of string | Platform tags on the account; omitted when none |
 
 ### Profile Object Fields
 
@@ -297,6 +306,7 @@ async function buildFeatureMenu(userToken, userEoaAddress) {
 | `profile.date_of_birth` | string | `YYYY-MM-DD` |
 | `profile.nationality` | string | ISO 3166-1 alpha-2 |
 | `profile.phone_number` | string | Phone number with country code |
+| `profile.registration_date` | string | When the user registered (ISO 8601, UTC) |
 
 The profile object has no `phone_confirmed`, `created_at` or `updated_at` fields in the API reference.
 
