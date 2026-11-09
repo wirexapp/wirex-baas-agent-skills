@@ -1,6 +1,6 @@
 ---
 name: wirex-baas-sdk
-description: "Wirex BaaS TypeScript/JavaScript SDK (@wirexapp/wpay-baas-sdk) — official typed npm package wrapping OAuth2 token flow, BaaS REST services, and ZeroDev Kernel account-abstraction wallet operations. Covers installation (Node >= 18, viem peer dependency), createSDK options (env, companyId, chainId, getMainWalletClient, rhinoApiKey, logging), the MainWalletClient EIP-1193 contract, three auth paths (company OAuth2, Privy, JWT), the 7-step user registration flow (incl. single-signature allInOneStepOnboarding), sdk.api.baas.* services (incl. Circle FX swap estimate/execute), sdk.crypto.* modules (token transfers with or without the execution delay, batch transfers, yield, smart deposit addresses), and typed error classes. Use when writing Node/TypeScript code against Wirex BaaS instead of raw HTTP."
+description: "Wirex BaaS TypeScript/JavaScript SDK (@wirexapp/wpay-baas-sdk) — official typed npm package wrapping OAuth2 token flow, BaaS REST services, and ZeroDev Kernel account-abstraction wallet operations. Covers installation (Node >= 18, viem peer dependency), createSDK options (env, companyId, chainId, getMainWalletClient, rhinoApiKey, logging), the MainWalletClient EIP-1193 contract, three auth paths (company OAuth2, Privy, JWT), the 7-step user registration flow (incl. single-signature allInOneStepOnboarding), sdk.api.baas.* services (incl. Circle FX swap estimate/execute), sdk.crypto.* modules (token transfers with or without the execution delay, synthetic token transfers, batch transfers (BaaS Corporate only), yield, smart deposit addresses), and typed error classes. Use when writing Node/TypeScript code against Wirex BaaS instead of raw HTTP."
 license: Apache-2.0
 compatibility: "Requires network access. Compatible with Claude Code, Codex, and all Agent Skills spec tools."
 metadata:
@@ -14,7 +14,7 @@ metadata:
 
 `@wirexapp/wpay-baas-sdk` is the official typed SDK for Wirex BaaS. One npm package wraps the OAuth2 token flow, all BaaS REST endpoints, and on-chain Account Abstraction wallet operations (ZeroDev Kernel V3.1). It is published on npm: https://www.npmjs.com/package/@wirexapp/wpay-baas-sdk.
 
-> This is **not** the card-data SDK. Card collection, card reveal and 3DS in a browser are covered by the PCI Compliant SDK (see the `wirex-baas-pci-sdk` skill, packages `@wirexapp/card-*`). The two are installed and versioned independently and can be used together.
+> This is **not** the card-data SDK. Card collection, card reveal, the top-up 3DS step and the Apple Pay / Google Pay top-up checkout are covered by the PCI Compliant SDK (see the `wirex-baas-pci-sdk` skill), the recommended path for those surfaces, available for Web (`@wirexapp/card-*`), React Native, Flutter, iOS and Android. The two are installed and versioned independently and can be used together.
 
 Use the SDK when you write Node.js / TypeScript code. For raw HTTP integration see the other skills (`wirex-baas-auth`, `wirex-baas-onboarding`, `wirex-baas-cards`, `wirex-baas-transfers`, `wirex-baas-crypto`). The SDK does not apply to External Authorization (see `wirex-baas-external-auth`): that model has no on-chain wallet.
 
@@ -135,7 +135,7 @@ Full method tables are in [the reference](references/REFERENCE.md).
 | `sdk.api.baas.token` | `getToken(request)` OAuth2 exchange |
 | `sdk.api.baas.user` | `getUser`, `getUserV2`, `createUser`, `authorizeUser`, phone, KYC documents and tokens |
 | `sdk.api.baas.wallet` | `getWallet`, `getWallets`, `createGlobalWallet` |
-| `sdk.api.baas.cards` | issue, list, lifecycle, details/CVV/PIN, limits, top-up and withdrawal, 3DS, delivery, order fees |
+| `sdk.api.baas.cards` | issue, list, lifecycle, details/CVV/PIN, limits, card transfer, 3DS, delivery, order fees |
 | `sdk.api.baas.confirmation` | `requestSms`, `verifySms`, `verifySignature` (action tokens) |
 | `sdk.api.baas.bank` | accounts, bank and corridor transfers |
 | `sdk.api.baas.swap` | Circle FX stablecoin swap: `estimate`, `execute` |
@@ -147,7 +147,7 @@ Full method tables are in [the reference](references/REFERENCE.md).
 | `sdk.crypto.accountAbstraction` | policy and executor install |
 | `sdk.crypto.accountContract` | Accounts contract registration |
 | `sdk.crypto.onboarding` | `allInOneStepOnboarding()` |
-| `sdk.crypto.transfer` | token transfers (with / without delay policy), batch |
+| `sdk.crypto.transfer` | token transfers (with / without delay policy), synthetic token transfer, batch (BaaS Corporate only) |
 | `sdk.crypto.yield` | yield data, withdraw, switch token |
 | `sdk.crypto.smartDepositAddress` | multi-chain deposit addresses (needs `rhinoApiKey`) |
 
@@ -163,14 +163,14 @@ const details = await sdk.api.baas.cards.getCardDetails(cardId, { action_token: 
 const cvv = await sdk.api.baas.cards.getCardCvv(cardId, { action_token: tokenRes.token }); // -> { cvv }
 ```
 
-In UAT the OTP code is `000000`. For browser-side display without handling PAN yourself use the PCI SDK instead.
+In UAT the OTP code is `000000`. `getCardDetails`, `getCardCvv` and `getCardPin` return raw values to your code, which is permitted only in a PCI DSS compliant environment. To show card data to the user without handling the PAN yourself use the PCI SDK instead (Web, React Native, Flutter, iOS, Android: skill `wirex-baas-pci-sdk`); you still mint the action token.
 
 ### Token transfer out of the wallet (ExecutionDelayPolicy)
 
 `tokenAddress` must be a **synthetic** token (e.g. WUSD): it is unwrapped and its base token is sent.
 
 ```typescript
-// single call: request -> wait out the delay on-chain -> final execution; no backend polling
+// single call: request -> read the request's validAfter and wait until the chain timestamp passes it -> final execution; no backend polling
 const finalTxHash = await sdk.crypto.transfer.makeErc20TransferFull({
   tokenAddress: '0x...', recipientAddress: '0x...', amount: 100,
 });
@@ -180,7 +180,7 @@ const result = await sdk.crypto.transfer.makeFullErc20Transfer({ tokenAddress: '
 // result.firstPartTxHash, result.finalTxHash, result.success
 ```
 
-Manual control: `makeErc20TransferFirstPart(params)` -> `sdk.api.withdrawal.getWithdrawalRequests()` (find yours, use its `call_data`) -> `makeErc20TransferFinal(callData)` after `valid_after`. Other methods: `makeErc20TransferSynthetic(params)` (send synthetic tokens directly, no unwrap, no delay policy), `makeTransferWithoutDelayPolicy(params)` (unwrap + send in one op, used for the FX swap payment leg), `batchTransfer({ tokenAddress, responses: [{ transaction_id, operation_id, crypto_transfers: [{ address, precise_amount }] }] })` (`precise_amount` in the token's smallest unit).
+Manual control: `makeErc20TransferFirstPart(params)` -> `sdk.api.withdrawal.getWithdrawalRequests()` (find yours, use its `call_data`) -> `makeErc20TransferFinal(callData)` after `valid_after`. Other methods: `makeErc20TransferSyntheticFull(params)` (send the synthetic token itself, no unwrap, through the ExecutionDelayPolicy in one call: request -> wait until `validAfter` -> transfer; the recipient receives e.g. WUSD and no base token moves), `makeErc20TransferSynthetic(params)` (same, single UserOperation without a `request(...)` first; on a smart wallet with the ExecutionDelayPolicy installed it reverts with `AA23 ... Operation should be requested first`, use `makeErc20TransferSyntheticFull` there), `makeTransferWithoutDelayPolicy(params)` (unwrap + send in one op, used for the FX swap payment leg), `batchTransfer({ tokenAddress, responses: [{ transaction_id, operation_id, crypto_transfers: [{ address, precise_amount }] }] })` (**BaaS Corporate only**: the ids come only from the corporate bulk-transfer API `POST /api/v1/bulk/transfer`, any other ids revert with `Batch transaction not found` and no funds move; retail integrations send one transfer per recipient; `precise_amount` in the token's smallest unit).
 
 ### FX swap (estimate -> pay -> execute)
 

@@ -40,7 +40,7 @@ Status lifecycle: `Requested` -> `NotActivated` -> `Active`; `Active` <-> `Block
 2. `GET /api/v1/cards/{type}/fees/{country}` (`type` = `Plastic`, `Virtual`, `Metal`, case-insensitive; `country` uppercase ISO 3166-1 alpha-2). The answer decides the flow:
    - `400 ErrorNotSupported` / `You have no card order/delivery fees to pay` — fees not enforced: skip every fee step and issue directly.
    - `400 ErrorNotSupported` / `Card issuance is not supported for this company` — no card configuration; contact Wirex.
-   - `200` with `order_fee` — fees enforced: pick the v1 or v2 flow and follow it end to end. `order_fee` excludes delivery; the invoice returns the combined total.
+   - `200` with `order_fee` — fees enforced: pick the v1, v2 or v3 flow and follow it end to end. v3 (`POST /api/v3/cards/virtual`, `/plastic`) uses the v2 invoice (`delivery_id`; v3 has no invoice endpoint of its own), takes optional `design`, `card_program`, `payment_system` from `GET /api/v3/cards/config`, and needs the fee only when the order is priced above zero (v1 likewise needs `payment_transaction_hash` only then). `order_fee` excludes delivery; the invoice returns the combined total.
 3. Plastic only: `GET /api/v1/cards/delivery/countries` (array of ISO codes) and `GET /api/v1/cards/delivery/methods/{country}` (`provider`, `fee`, `currency`, `estimated_payment_amounts[]`). `provider` is the value passed as `delivery_provider`.
 
 Fee endpoints are applicable only if your account manager advised you to handle card fees.
@@ -100,9 +100,9 @@ The address field is `postal_code` on input and `zip_code` on the card record re
 
 ## Listing Cards
 
-`GET /api/v1/cards` (`CardSu` or `CardView`); query `employee_id`, `page_number`, `page_size`. There is no get-card-by-id endpoint: read the list and filter on `id`. `CardView` alone sees only its own linked cards and a sent `employee_id` filter is dropped without error.
+`GET /api/v1/cards` (`CardSu` or `CardView`); query `employee_id`, `page_number`, `page_size`. Get one card with `GET /api/v3/cards/{cardId}` (`CardSu` or `CardView`; `GET /api/v3/cards` lists across every chain), or read the v1 list and filter on `id`. `CardView` alone sees only its own linked cards and a sent `employee_id` filter is dropped without error.
 
-Card item: `id`, `card_wallet_address`, `status` (`Requested`, `NotActivated`, `Active`, `Blocked`, `Closed`), `status_reason`, `previous_status`, `card_data` (`name_on_card`, `payment_system` `Visa`/`MasterCard`, `card_number_first_4` only while `Requested`/`NotActivated`, `card_number_last_4` and `expiry_date` `MM/YYYY` afterwards, `format`, `card_name`), `limit`, `delivery_address`, `allowed_actions[]` (`type`, `relative_path`; reflects card status only, not caller permissions), `created_at`, `updated_at`.
+Card item: `id`, `card_wallet_address`, `status` (`Requested`, `NotActivated`, `Active`, `Blocked`, `Closed`), `status_reason`, `previous_status`, `card_data` (`name_on_card`, `payment_system` `Visa`/`MasterCard`, `card_number_first_4` only while `Requested`/`NotActivated`, `card_number_last_4` and `expiry_date` `MM/YY` on the list (the details call returns `MM/YYYY`; do not compare the strings directly) afterwards, `format`, `card_name`, and when set `design`, `card_program`, `region`), `limit`, `delivery_address`, `allowed_actions[]` (`type`, `relative_path`; reflects card status only, not caller permissions), `created_at`, `updated_at`.
 
 ## Sensitive Data: Action Tokens
 
@@ -128,7 +128,7 @@ Response `{"token": "<action_token>"}`. The nonce expires after 120 seconds (`In
 
 Never log or persist PAN, CVV, PIN or action tokens. Mint tokens on demand, not speculatively.
 
-Note: docs differ on `3dsChallenge`. Card Details says all three card-detail endpoints refuse it (`invalid_purpose`, including PIN); the 3DS guide says a `3dsChallenge` token is scoped to PIN retrieval. The reference lists both enum values without scoping. Treat PIN reads as `GetCardDetails`.
+A `3dsChallenge` token is refused by every card-data endpoint (`invalid_purpose`, PIN included): the 3DS guide now says the same and tells you to read PIN, PAN or CVV during a challenge with a `GetCardDetails` token. Details of the sentence and errors: [Action Confirmation Signatures](https://docs.wirexapp.com/docs/corporate-action-confirmation-signatures).
 
 ## Managing a Card
 
@@ -168,7 +168,7 @@ A merchant's 3D Secure request holds the transaction until the corporation decid
 3. Decisions are final. A second call returns `400 ErrorNotFound` / `No active 3DS request for this transaction` (already decided, or not yours, indistinguishable). Treat it as success for idempotency and never follow it with the opposite decision.
 4. Webhook delivery is best-effort (10 s timeout, no retries): also poll the list on a schedule, since an undecided challenge blocks a real transaction.
 
-Note: docs differ. The Auth Tokens guide lists approving or declining a 3DS challenge as needing a `3dsChallenge` action token; the 3DS guide and the API reference describe approve and decline with a corporation token and no body, and the reference security for them is the card-manage permission only.
+Approve and decline take the corporation token and no body; the Auth Tokens guide no longer lists them as needing a `3dsChallenge` action token.
 
 ## Card Webhooks
 
@@ -182,7 +182,7 @@ Note: docs differ. The Auth Tokens guide lists approving or declining a 3DS chal
 |---|---|---|---|
 | 400 | `ErrorNotFound` | `No fees found for specified country and method` | Format not offered there |
 | 400 | `ErrorMissingField` | `delivery provider is required for physical cards` | Use `provider` from delivery methods |
-| 400 | `ErrorInvalidField` | `Invalid value for type` / `Invalid format for country` | `Plastic`, `Virtual`, `Metal`; uppercase two letters |
+| 400 | `ErrorInvalidField` | `Invalid value for type` / `Invalid format for country` | `Plastic`, `Virtual`, `Metal` (the fee endpoint accepts `Metal`, but no version issues metal cards); uppercase two letters |
 | 400 | `ErrorGeneral` | `Delivery ID is required and must be positive` | Create a v2 invoice |
 | 400 | `ErrorGeneral` | `Cards name is invalid` / `Name on card is invalid` | Match the patterns |
 | 400 | `ErrorGeneral` | `Capability is not active` | Card capability not `Active` |

@@ -141,19 +141,27 @@ interface RegisterCompanyParams {
 
 | Method | Description |
 | --- | --- |
-| `makeErc20TransferFull(params)` | Full transfer in one call: `request(...)` → wait out the ExecutionDelayPolicy delay on-chain → submit the final execution under its custom nonce. No backend/withdrawal-request polling. |
+| `makeErc20TransferFull(params)` | Full transfer in one call: `request(...)` → read the request's `validAfter` from the ExecutionDelayPolicy and wait until the chain timestamp passes it → submit the final execution under its custom nonce. No backend/withdrawal-request polling. |
 | `makeFullErc20Transfer(params)` | Full transfer driven by the backend: firstPart → poll withdrawal requests and wait for `valid_after` → final. Requires the Withdrawal API. |
 | `makeErc20TransferFirstPart(params)` | First part only: submit the ExecutionDelayPolicy `request(...)` (creates the withdrawal request) |
 | `makeErc20TransferFinal(callData)` | Second part only: complete the transfer with the request's calldata under its custom nonce |
-| `makeErc20TransferSynthetic(params)` | Transfer synthetic tokens directly (no unwrap, no delay policy) |
+| `makeErc20TransferSynthetic(params)` | Send a synthetic token as is (no unwrap) in a single UserOperation, without a `request(...)` first. On a smart wallet with the ExecutionDelayPolicy installed it reverts with `AA23 … Operation should be requested first`; use `makeErc20TransferSyntheticFull` there. |
+| `makeErc20TransferSyntheticFull(params)` | Send a synthetic token as is (no unwrap) through the ExecutionDelayPolicy in one call: `request(...)` → wait until `validAfter` → submit the `transfer` under its custom nonce. The recipient receives the synthetic token (e.g. WUSD); no base token moves. |
 | `makeTransferWithoutDelayPolicy(params)` | Unwrap a synthetic and transfer its base token in a single op, bypassing the ExecutionDelayPolicy. Used for the on-chain payment leg of an FX swap. |
-| `batchTransfer(params)` | Execute multiple transfers in a batch |
+| `batchTransfer(params)` | **BaaS Corporate only.** Execute backend bulk-transfer responses: one UserOperation per response, each under the custom nonce of its calldata. Returns the transaction hashes in response order. The `transaction_id` and `operation_id` come only from the corporate bulk-transfer API (`POST /api/v1/bulk/transfer`); with any other ids it reverts in simulation with `Batch transaction not found` and no funds move. Retail integrations send one transfer per recipient. |
 
 **Transfer Parameters:**
 
 ```typescript
 interface Erc20TransferParams {
   tokenAddress: `0x${string}`;
+  recipientAddress: `0x${string}`;
+  amount: number;
+}
+
+// Used by makeErc20TransferSynthetic / makeErc20TransferSyntheticFull; the synthetic token is sent as is (no unwrap)
+interface SyntheticTransferParams {
+  tokenAddress: `0x${string}`;     // synthetic token, e.g. WUSD
   recipientAddress: `0x${string}`;
   amount: number;
 }
@@ -333,8 +341,6 @@ interface SwapExecuteResponse {
 | `changeCardName(cardId, request)` | Change card name |
 | `estimateCardTransfer(request)` | Estimate card transfer |
 | `executeCardTransfer(request)` | Execute card transfer |
-| `estimateCardWithdrawal(cardId, request)` | Estimate card withdrawal |
-| `executeCardWithdrawal(cardId, request)` | Execute card withdrawal |
 | `getActive3dsRequests()` | Get active 3DS requests |
 | `approve3dsRequest(transactionId)` | Approve 3DS request |
 | `decline3dsRequest(transactionId)` | Decline 3DS request |
@@ -342,6 +348,8 @@ interface SwapExecuteResponse {
 | `getDeliveryMethods(country)` | Get card delivery methods |
 | `getOrderFees(type, country)` | Get card order fees |
 | `createOrderFeesInvoice(type, country, request)` | Create order fees invoice |
+
+> **Recommended:** reveal card data to the user through the PCI Compliant SDK (skill `wirex-baas-pci-sdk`). `getCardDetails`, `getCardCvv` and `getCardPin` return raw values to your code, which is permitted only in a PCI DSS compliant environment.
 
 Sensitive card data (PAN, CVV, PIN) requires an action token obtained via SMS OTP:
 

@@ -120,7 +120,7 @@ Privy and Crossmint identity tokens are accepted on `register`, `login` and `emp
 
 KYB runs in the SumSub SDK; Wirex issues the SDK token. There is no API for submitting, amending, cancelling or restarting KYB data.
 
-1. `POST /api/v1/corporations/level-token` with `{"verification_level": "SDD"}` (requires `Su`). Levels: `SDD`, `EDD`, `XDDBridgeBase`, `XDDOpenPaydBase`. `N/A` is rejected (`400 ErrorInvalidField`); **any other unrecognised value, including lowercase `sdd` or a typo, silently produces an `SDD` token**.
+1. `POST /api/v1/corporations/level-token` with `{"verification_level": "SDD"}` (requires `Su`). Levels: `SDD`, `EDD`, `XDDBridgeBase` (required, after `SDD`, for ACH and Fedwire; its token moves the whole corporation back into review: `verification_status` `Applied`, `verification_levels` emptied, SDD-gated capabilities `NotFulfilled` until approved), `XDDOpenPaydBase`. `N/A` is rejected (`400 ErrorInvalidField`); **any other unrecognised value, including lowercase `sdd` or a typo, silently produces an `SDD` token**.
 2. Open the SumSub Web or Mobile SDK with the returned `token`. Tokens are short-lived; request a fresh one when the SDK reports expiry.
 3. Track progress by webhook (`/v2/webhooks/corporations`) and by `GET /api/v1/corporations` (`verification_levels[]` is authoritative; `passed_levels[]` is obsolete).
 
@@ -157,7 +157,8 @@ Evaluation order: country, per-corporation overrides, verification levels, prere
 | ACH | `AchAccount`, `AchIn1stParty`, `AchIn3rdParty`, `AchOut1stParty`, `AchOut3rdParty` |
 | SPEI | `SpeiAccount`, `SpeiIn1stParty`, `SpeiIn3rdParty`, `SpeiOut1stParty`, `SpeiOut3rdParty` |
 | Faster Payments | `FasterPaymentsAccount`, `FasterPaymentsIn1stParty`, `FasterPaymentsIn3rdParty`, `FasterPaymentsOut1stParty`, `FasterPaymentsOut3rdParty` |
-| CPN corridors | `CpnExternalProfile` (provisioned by Wirex), `PixOut3rdParty`, `FedwireOut3rdParty`, `SwiftOut3rdParty`, `CipsOut3rdParty`, `ChatsOut3rdParty`, `FpsHkOut3rdParty` |
+| CPN corridors | `CpnExternalProfile` (provisioned by Wirex), `PixOut3rdParty`, `SwiftOut3rdParty`, `CipsOut3rdParty`, `ChatsOut3rdParty`, `FpsHkOut3rdParty` |
+| Fedwire (bank corridor) | `FedwireOut3rdParty`, prerequisite `AchAccount` (same USD account as ACH) |
 | Triple-A corridors | `TripleAExternalProfile` (provisioned by Wirex), `ImpsOut3rdParty`, `InstapayOut3rdParty`, `BiFastOut3rdParty`, `NipOut3rdParty`, `IppOut3rdParty`, `PseOut3rdParty` |
 | Exchange | `FxTransfer`, `StableExchange` |
 
@@ -169,7 +170,7 @@ Diagnosing a blocked capability: read `status_reason`; for verification compare 
 
 ## Wallets and Balances
 
-`GET /api/v1/wallets` (no permission) returns `data[]` with `wallet_address`, `wallet_name` (`Main Wallet` for the primary unless renamed), `wallet_status` (`Unknown`, `Confirmed`, `Rejected`), `wallet_type` (`Primary`, `Secondary`, `Global`) and `balances[]` (`token_symbol`, `token_address`, `balance`, `reference_balance`, `reference_currency`).
+`GET /api/v1/wallets` (no permission) returns `data[]` with `wallet_address`, `wallet_name` (`Main Wallet` for the primary unless renamed), `wallet_status` (`Unknown`, `Confirmed`, `Rejected`), `wallet_type` (`Primary`, `Secondary`, `Global`) and `balances[]` (`token_symbol`, `token_address`, `balance` (rounded to 2 decimals), `balance_precise` + `decimals` (exact, compute on these), `reference_balance`, `reference_currency`).
 
 - The `Primary` wallet is the corporation wallet and funds every debit (card fees, bank and corridor transfers). It is created asynchronously after registration and starts `Unknown`; `Rejected` means the wallet configuration is invalid and re-registering does not repair it.
 - Note: docs differ. The schema says `reference_currency` depends on the corporation's registration country; the endpoint always converts to `USD`. Do not present `reference_balance` as a local-currency figure.
@@ -180,7 +181,7 @@ Diagnosing a blocked capability: read `status_reason`; for verification compare 
 
 ## Global Wallets
 
-`POST /api/v1/wallets/global` (`Su` only) with `wallet_address` (required) and `wallet_name`; response `{}`. It is bookkeeping: the address is only checked to be non-zero (a typo registers successfully), the wallet appears with `wallet_type` `Global` and `wallet_status` `Unknown`. The bridged deposit address is created client-side with Rhino.fi (key under `auth.rhinoApiKey` in `GET /api/v1/config`), exactly as on retail; the two calls are independent. No endpoint renames, deregisters or lists global wallets separately; registering the same address twice fails with `Failed to create global wallet`.
+`POST /api/v1/wallets/global` (`AccountSu`, `AccountCreate`, `AccountManage` or `Su`) with `wallet_address` (required) and `wallet_name`; response `{}`. It is bookkeeping: the address is only checked to be non-zero (a typo registers successfully), the wallet appears with `wallet_type` `Global` and `wallet_status` `Unknown`. The bridged deposit address is created client-side with Rhino.fi (key under `auth.rhinoApiKey` in `GET /api/v1/config`), exactly as on retail; the two calls are independent. No endpoint renames, deregisters or lists global wallets separately; registering the same address twice fails with `Failed to create global wallet`.
 
 ## Onboarding Errors
 
@@ -190,6 +191,6 @@ Diagnosing a blocked capability: read `status_reason`; for verification compare 
 | 401 | `ErrorGeneral` | `Only owner of the corporation can register the corporation` | Wrong signer or not Owner |
 | 401 | `ErrorGeneral` | `Employee is disabled` | Disabled employee |
 | 500 | `ErrorGeneral` | `Failed to query corporation wallets` | No primary wallet yet; finish on-chain registration |
-| 403 | `ErrorPermissionDenied` | `User does not have required permissions` | `level-token`, `verification-token`, `wallets/global` need `Su` |
+| 403 | `ErrorPermissionDenied` | `User does not have required permissions` | `level-token` and `verification-token` need `Su`; `wallets/global` needs `AccountSu`, `AccountCreate` or `AccountManage` (log in again after a role change) |
 | 500 | `ErrorGeneral` | `Failed to get verification token` | Not eligible for that level or provider rejected; check the level is not already `Approved` |
 | 400 | `ErrorGeneral` | `Capability is not active` | Required capability is not `Active`; read `GET /api/v1/corporations` |

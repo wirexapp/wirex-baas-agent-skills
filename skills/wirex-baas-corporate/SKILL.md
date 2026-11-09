@@ -37,7 +37,7 @@ The Corporate API serves **businesses**: one corporation owns wallets, cards and
 
 - The two APIs do not share credentials: a corporate `client_id` is rejected by retail and vice versa. Retail hosts do not route corporate endpoints.
 - Terminology mapping: the retail S2S token is the corporate **partner token**; the retail user token is the corporate **corporation token**.
-- Routes are served under `/api/v1`, `/api/v2` and `/api/v3`. A v2 route does not deprecate its v1 sibling; use the version shown in the flow.
+- Routes are served under `/api/v1`, `/api/v2` and `/api/v3`. A v2 or v3 route does not deprecate its v1 sibling; use the version shown in the flow.
 
 ## Environments
 
@@ -110,7 +110,7 @@ For sensitive card actions the employee signs a message with their wallet:
 3. `POST /api/v1/confirmation/signature/verify` with the corporation token and body `action_type`, `message_signature`, `nonce`. Requires `CardSu` or `CardViewDetails`.
 4. Send the returned token as `action_token` in the card-details body. It lives 5 minutes.
 
-`POST /api/v1/confirmation/signature` is the obsolete form of the same call. Scoping differences for `3dsChallenge`: see [CARDS.md](references/CARDS.md).
+`POST /api/v1/confirmation/signature` is the obsolete form of the same call. Read PAN, CVV and PIN (also during a 3DS challenge) with a `GetCardDetails` token: a `3dsChallenge` token is refused by every card-data endpoint with `invalid_purpose`. Details: [CARDS.md](references/CARDS.md).
 
 ## Registration and Onboarding (KYB)
 
@@ -127,12 +127,12 @@ A corporation exists on-chain first, then in Wirex. Detail and contract addresse
 
 Corporation `status`: `Pending`, `Active`, `Blocked`, `Deleted`. KYB `verification_status`: `Pending`, `Applied`, `InReview`, `Approved`, `Rejected`, `Canceled`. `PUT /api/v1/corporations/freshdesk-id` stores a support identifier (body `freshdesk_id`).
 
-Levels: `SDD`, `EDD`, `XDDBridgeBase`, `XDDOpenPaydBase`. An unrecognised level silently yields an `SDD` token, so validate it yourself.
+Levels: `SDD`, `EDD`, `XDDBridgeBase`, `XDDOpenPaydBase`. An unrecognised level silently yields an `SDD` token, so validate it yourself. `XDDBridgeBase` is required, after `SDD`, for ACH and Fedwire. Requesting its token puts the whole corporation back into review: `verification_status` reads `Applied`, `verification_levels` is emptied and every capability gated on `SDD` (card issuance included) reads `NotFulfilled` until the level is approved.
 
 ### Wallets and balances
 
-- `GET /api/v1/wallets` (no permission): `data[]` with `wallet_address`, `wallet_status` and balances per token, with a USD reference currency. Note: docs differ: the schema says the reference currency follows the corporation country; the endpoint always returns USD.
-- `POST /api/v1/wallets/global` (`Su` only) registers an extra address to receive cross-chain deposits (global deposit addresses via Rhino.fi, same as retail).
+- `GET /api/v1/wallets` (no permission): `data[]` with `wallet_address`, `wallet_status` and balances per token, with a USD reference currency. `balance` is rounded to 2 decimal places: compute and check funds with `balance_precise` (scaled by `decimals`). Note: docs differ: the schema says the reference currency follows the corporation country; the endpoint always returns USD.
+- `POST /api/v1/wallets/global` (`AccountSu`, `AccountCreate`, `AccountManage` or `Su`; owner-only before October 2026) registers an extra address to receive cross-chain deposits (global deposit addresses via Rhino.fi, same as retail).
 
 ## Employees, Roles and Permissions
 
@@ -156,7 +156,7 @@ Employee lifecycle: invite creates an `Invited` employee; when the invitee logs 
 | PUT | `/api/v1/roles/{roleId}` | Replaces name and the full permission set |
 | DELETE | `/api/v1/roles/{roleId}` | Custom roles only |
 
-Permission code families (numeric codes 101-118 and the default role table are in TEAM-AND-PERMISSIONS.md): `Su` (owner-level, only the owner), `EmployeeSu/Manage/View`, `CardSu/Create/Manage/View/ViewDetails/LimitManage`, `TransactionSu/Create/Manage`, `AccountSu/Create/View`. Missing permission returns `403 ErrorPermissionDenied`. Custom roles cannot include `Su`.
+Permission code families (numeric codes 101-118 and the default role table are in TEAM-AND-PERMISSIONS.md): `Su` (owner-level, only the owner), `EmployeeSu/Manage/View`, `CardSu/Create/Manage/View/ViewDetails/LimitManage`, `TransactionSu/Create/Manage`, `AccountSu/Create/Manage/View`. Missing permission returns `403 ErrorPermissionDenied`. Custom roles cannot include `Su`.
 
 Note: docs differ. The Employees reference lists `phone` as optional on invite; the Employees guide says it is required, and card embossing depends on it. Send it (format `+` followed by 1-15 digits).
 
@@ -164,13 +164,14 @@ Note: docs differ. The Employees reference lists `phone` as optional on invite; 
 
 Detail: [CARDS.md](references/CARDS.md), [guide](https://docs.wirexapp.com/docs/corporate-cards).
 
-Cards are **virtual** or **plastic**; ceilings 30 virtual and 15 plastic cards per corporation (a closed card frees a slot). Issuance may carry an order fee, only when fees are enforced for your company; otherwise `GET /api/v1/cards/{type}/fees/{country}` returns `400 You have no card order/delivery fees to pay` and the card is issued directly. There is no `GET /api/v1/cards/{cardId}`: list and filter.
+Cards are **virtual** or **plastic**; ceilings 30 virtual and 15 plastic cards per corporation (a closed card frees a slot). Issuance may carry an order fee, only when fees are enforced for your company; otherwise `GET /api/v1/cards/{type}/fees/{country}` returns `400 You have no card order/delivery fees to pay` and the card is issued directly. There is no `GET /api/v1/cards/{cardId}`: use `GET /api/v3/cards/{cardId}` (`CardSu` or `CardView`; `GET /api/v3/cards` lists across every chain) or list and filter.
 
 ### Issue a card (v2 fee flow, when fees are enforced)
 
 1. `GET /api/v1/cards/{type}/fees/{country}` (`type` = `Plastic` or `Virtual`) returns the fee. For plastic: `GET /api/v1/cards/delivery/countries` and `GET /api/v1/cards/delivery/methods/{country}`.
 2. `POST /api/v2/cards/{type}/fees/{country}/payment` (body `token_address`, plus `delivery_provider` for non-Virtual) returns a fee invoice with `delivery_id`. Wirex debits the fee at issuance; no on-chain payment.
 3. `POST /api/v2/cards/virtual` or `POST /api/v2/cards/plastic` with `card_name`, `name_on_card`, employee link and `delivery_id`; plastic also `delivery_provider`, `delivery_address`.
+   v3 (`POST /api/v3/cards/virtual`, `/plastic`) uses the same v2 fee invoice and `delivery_id`, takes optional `design`, `card_program`, `payment_system` read from `GET /api/v3/cards/config` (`CardSu`, `CardCreate` or `CardView`), and requires a fee only when the order is priced above zero. No version issues metal cards.
 4. v1 alternative (you pay the fee on-chain yourself): `/api/v1/cards/{type}/fees/{country}/payment` returns `recipient_address`; transfer the fee, then `/api/v1/cards/virtual` or `/api/v1/cards/plastic` take `payment_transaction_hash` instead of `delivery_id`. Do not mix v1 and v2 calls.
 5. Observe `/v2/webhooks/cards` or poll `GET /api/v1/cards` (`CardSu` or `CardView`; admins may pass `employee_id`).
 
@@ -196,7 +197,7 @@ Limits: body `daily_limit`, `limit`, `monthly_limit`, `transaction_limit`. The c
 - `POST /api/v1/cards/3ds/requests/{transactionId}/approve` and `/decline`: corporation token, no body, permission `CardSu` or `CardManage`.
 - Webhook: `/v2/webhooks/3ds`.
 
-Note: docs differ. One guide says approve/decline need a `3dsChallenge` action token; the 3DS guide and the reference describe the corporation token only. Follow the reference and fall back to the action token if refused. Also the `3dsChallenge` token scope (PIN only vs all card details) is described inconsistently.
+Approve/decline take the corporation token only (the Auth Tokens guide no longer lists them as needing a `3dsChallenge` action token). The earlier fallback to an action token is unverified. The `3dsChallenge` token scope is no longer disputed: every card-data endpoint refuses it.
 
 ## Transfers
 
@@ -205,7 +206,7 @@ Detail: [TRANSFERS.md](references/TRANSFERS.md), [guide](https://docs.wirexapp.c
 | Goal | Path |
 |---|---|
 | Crypto batch to many wallets | `POST /api/v1/bulk/transfer` |
-| SEPA / ACH / Faster Payments (v1/v2) | `POST /api/v1/bank/transfer/estimate` or `/api/v2/...`, then `POST /api/v1/bank/transfer` |
+| SEPA / ACH / Faster Payments (v1/v2) | `POST /api/v1/bank/transfer/estimate` or `/api/v2/...`, then `POST /api/v1/bank/transfer` with the `estimation_id` (an `amount`-only execute is refused) |
 | Local corridor (PIX, FPS HK, IMPS, InstaPay, BI-FAST, NIP, IPP, PSE and more) | `POST /api/v3/bank/estimate/{corridor}`, `POST /api/v3/bank/initiate/{corridor}`, `POST /api/v3/bank/confirm/{corridor}` |
 | Push to external card | `POST /api/v1/cards/transfer/estimate`, `POST /api/v1/cards/transfer` |
 | Token swap | `POST /api/v1/fx/estimate`, `POST /api/v1/fx` |
@@ -214,14 +215,14 @@ Permissions: bank, corridor and bulk need `TransactionSu` or `TransactionCreate`
 
 ### Bank accounts
 
-1. `GET /api/v1/bank/accounts` (`TransactionSu`, `TransactionCreate` or `AccountView`) lists accounts and details; each entry has an `id` and, when `Active`, bank details.
+1. `GET /api/v1/bank/accounts` (`TransactionSu`, `TransactionCreate` or `AccountView`) lists accounts and details; each entry has an `id` and, when `Active`, bank details. Activating `Ach` also adds `Fedwire` and `FedNow` entries to the same USD account (same routing and account numbers); `FedNow` is deposits only and is not accepted as `account_type`. ACH needs `XDDBridgeBase` on top of `SDD` (see Onboarding).
 2. `POST /api/v1/bank/accounts` (`TransactionSu`, `AccountSu`, `AccountCreate`) with `account_type` activates details. Poll the list: no webhook.
 
-Note: docs differ. The reference accepts `Sepa` as `account_type`; the Account Activation guide says SEPA is auto-provisioned on verification and rejects `Sepa`, and refuses `Swift`. Follow the corporation's `actions[]` (`ActivateSepaDetails` appears when accepted) and the `SepaAccount` status.
+Note: docs differ. The reference accepts `Sepa` as `account_type`; the Account Activation guide says SEPA is auto-provisioned on verification and rejects `Sepa`, and refuses `Swift`. Follow the capability status (`SepaAccount`): the Account Activation guide now says to read the capability, not `actions[]` (no action exists for Faster Payments, yet its activation is accepted at `ActivationNotStarted`).
 
 ### Bank transfer (v1/v2)
 
-1. Estimate: v1 `POST /api/v1/bank/transfer/estimate` (account, amount, no beneficiary) or v2 `POST /api/v2/bank/transfer/estimate`; ACH requires `recipient` and `recipient_account` in v2.
+1. Estimate: v1 `POST /api/v1/bank/transfer/estimate` (account, amount, no beneficiary) or v2 `POST /api/v2/bank/transfer/estimate` (`recipient` and `recipient_account` required on every rail); both return the same quote.
 2. Execute: `POST /api/v1/bank/transfer` with `account_id`, `token_address`, recipient data and the estimate.
 3. Follow the activity feed (types `Sepa`, `FasterPayment`, `AchPush`, `AchPull`).
 
@@ -232,11 +233,11 @@ Note: docs differ. The reference accepts `Sepa` as `account_type`; the Account A
 3. `POST /api/v3/bank/initiate/{corridor}` with `estimation_id`, `source_token_address`, `reference`.
 4. For CPN corridors the response contains a `FundTransfer` to confirm: `POST /api/v3/bank/confirm/{corridor}` with `transfer_id` and `actions[]`.
 
-The 16-row corridor table (currencies, rails, capabilities, providers) is in TRANSFERS.md.
+The 16-row corridor table (currencies, rails, capabilities, providers) is in TRANSFERS.md. `fedwire` is a bank corridor (`account_id` required, no confirm step) paying from the same USD account as `ach`; only `pix`, `spei`, `swift`, `cips`, `chats` and `fps_hk` are CPN. In `Signature` mode bank transfer, corridor `initiate` and card transfer carry `transaction_authorization` (see TRANSFERS.md).
 
 ### Bulk transfer
 
-`POST /api/v1/bulk/transfer` with `recipients[]` (1 to 50). It approves a crypto batch and **reserves** the balance for 24 hours; amounts are truncated to 2 decimals. The batch is then executed on-chain by the partner (TypeScript/ABI details in TRANSFERS.md). No webhook for approval; read the feed.
+`POST /api/v1/bulk/transfer` with `recipients[]` (1 to 50, `currency` `WUSD` or `WEUR`). It approves a crypto batch and **reserves** the balance for 24 hours; amounts are truncated to 2 decimals. The batch is then executed on-chain by the partner (TypeScript/ABI details in TRANSFERS.md). No webhook for approval; read the feed.
 
 ### Push to card
 
@@ -273,7 +274,7 @@ Detail: [WEBHOOKS-AND-ACTIVITY.md](references/WEBHOOKS-AND-ACTIVITY.md), [guide]
 - One webhook base URL per partner; route by `corporation_address`. HTTP POST JSON, 10 s timeout, **no retries**, no auth headers (allowlist IPs, make handlers idempotent).
 - Paths: `/v2/webhooks/corporations`, `/wallets`, `/balances`, `/cards`, `/card-limits`, `/3ds`, `/activities`, `/recipients`, `/erc-withdrawals`. `/v2/webhooks/user` and `/debt-cases` are retail only.
 - Not delivered (poll): employees, roles, bank account activation, FX swaps, bulk approval, capability changes.
-- `GET /api/v1/activity/feed`: `page_size` default 25, max 50; `types` and `subject` are mutually exclusive. Status `Pending`/`Completed`/`Failed`, direction `Inbound`/`Outbound`/`Internal`. No single-item read, no date filter.
+- `GET /api/v1/activity/feed`: `page_number` starts at `0`, `page_size` default 25, max 50; `types` and `subject` are mutually exclusive. Status `Pending`/`Completed`/`Failed`, direction `Inbound`/`Outbound`/`Internal`. No single-item read, no date filter.
 - `GET /api/v1/withdrawal/requests` lists ERC-20 withdrawals awaiting on-chain execution (time-locked by `ExecutionDelayCorporatePolicy`).
 
 ## Statements
@@ -298,7 +299,7 @@ Detail: [WEBHOOKS-AND-ACTIVITY.md](references/WEBHOOKS-AND-ACTIVITY.md), [guide]
 
 - Branch on `error_reason`; never parse `error_description`.
 - Categories: `CategoryValidationFailure` 400, `CategoryUnauthorized` 401, `CategoryForbidden` 403, `CategoryTransientFailure` 429, `CategoryInternalFailure` 500, `CategoryTransportFailure` 503.
-- The token endpoint rate limit (3 failed attempts per 60 min per `client_id` and per IP) returns `ErrorTooManyRequests` with **HTTP 500**, not 429.
+- The token endpoint rate limit (repeated failed attempts; successful exchanges are not counted) returns `ErrorTooManyRequests` with **HTTP 500**, not 429.
 - Validation errors have two shapes (structured `key: field` with `issue` and `pattern`, or keyed where the field is the key); handle both.
 - Note: docs differ. The reference types `error_reason` as an object; guides show a string. Read defensively.
 
@@ -310,7 +311,7 @@ Full reason list: [WEBHOOKS-AND-ACTIVITY.md](references/WEBHOOKS-AND-ACTIVITY.md
 
 ## Retail vs Corporate Feature Parity
 
-Not implemented for corporations: card top-up; XRPL accounts and withdrawals; `GET /api/v1/cards/{cardId}`; activity v2 feed, search and single-item read (only `GET /api/v1/activity/feed`). Global deposit addresses behave as on retail.
+Not implemented for corporations: card top-up; XRPL accounts and withdrawals; metal cards; `GET /api/v1/cards/{cardId}` (use `GET /api/v3/cards/{cardId}`); activity v2 feed, search and single-item read (only `GET /api/v1/activity/feed`). Global deposit addresses behave as on retail.
 
 ## Common Pitfalls
 

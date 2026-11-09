@@ -67,15 +67,15 @@ No webhook for employees, roles, bank account activation, FX swaps or bulk trans
 
 `GET /api/v1/activity/feed` (no permission). It is where every asynchronous outcome lands (FX, bulk and corridor transfers have no status endpoint).
 
-Query: `page_number`, `page_size` (default 25, **maximum 50**), `sort` (`name` or `usage`; neither orders by time), and one of `types[]` or `subject` (**mutually exclusive**, else `400 ErrorInvalidField` / `Fields are mutually exclusive`). `subject` is a wallet address, card id or account reference and must parse as an address or UUID; a bank account's composite `<accountId>:<detailsId>` is not a valid subject. No date filter, no free-text search, no single-item read: read the feed and filter on `id` (use statements for a period).
+Query: `page_number` (starts at `0`; `1` is the second page), `page_size` (default 25, **maximum 50**), `sort` (`name` or `usage`; neither orders by time), and one of `types[]` or `subject` (**mutually exclusive**, else `400 ErrorInvalidField` / `Fields are mutually exclusive`). `subject` is a wallet address, card id or account reference and must parse as an address or UUID; a bank account's composite `<accountId>:<detailsId>` is not a valid subject. No date filter, no free-text search, no single-item read: read the feed and filter on `id` (use statements for a period).
 
-Item fields: `id` (matches the `id` returned by the transfer that created it), `corporation_address`, `type`, `sub_type`, `status` (`Pending`, `Completed`, `Failed`), `status_reason`, `direction` (`Inbound`, `Outbound`, `Internal`), `created_at`, `reference`, `rrn` (card transactions), `source`, `destination`, `source_amount`, `destination_amount`, `fee_amount`, `rate`, `recipient`, `reward` (`Referral`, `Cashback`, `Bonus`), `operations[]` (`hash`, `operation_amount`, `transaction_amount`, `rate`), `activity_steps[]`.
+Item fields: `id` (matches the `id` returned by the transfer that created it), `corporation_address`, `type`, `sub_type`, `status` (`Pending`, `Completed`, `Failed`; a fully refunded card payment reads `Failed`, a partial refund stays `Completed`; see the Activity Status table in the guide), `status_reason`, `direction` (`Inbound`, `Outbound`, `Internal`), `created_at`, `reference`, `rrn` (card transactions), `source`, `destination`, `source_amount`, `destination_amount`, `fee_amount`, `rate`, `recipient`, `reward` (`Cashback`, `Bonus`), `operations[]` (`hash`, `operation_amount`, `transaction_amount`, `rate`), `activity_steps[]`.
 
-Activity types: `Deposit`, `Withdrawal`, `Exchange`, `Crypto`, `Sepa`, `FasterPayment`, `AchPull`, `AchPush`, `Swift`, `Spei`, `CardTransaction`, `ExternalCardTransaction`, `CardTransfer`, `CardFeesPayment`, `YieldClaim`; the `types` filter also accepts the corridor types `Pix`, `FpsHk`, `Imps`, `Instapay`, `BiFast`, `Nip`, `Ipp`, `Pse` (case-insensitive; unknown values give `Invalid value for types`).
+Activity types: `Deposit`, `Withdrawal`, `Exchange`, `Crypto`, `Sepa`, `FasterPayment`, `AchPull`, `AchPush`, `Swift`, `Spei`, `CardTransaction`, `ExternalCardTransaction`, `CardTransfer`, `CardFeesPayment`, `YieldClaim`, `Fedwire` (outbound `fedwire` payout or inbound deposit; `direction` tells them apart), `FedNow` (incoming only); the `types` filter also accepts the corridor types `Pix`, `FpsHk`, `Imps`, `Instapay`, `BiFast`, `Nip`, `Ipp`, `Pse` (case-insensitive; unknown values give `Invalid value for types`).
 
 Step types: `Initiated`, `CryptoIn`, `CryptoOut`, `BankIn`, `BankOut`, `CardIn`, `CardOut`, `SyntheticWrap`, `SyntheticUnwrap`, `Trade`, `Review`, `Reversal`, `Completed`. Each step has its own `status`, so a `Pending` activity shows where it is. A `Review` step means a compliance hold (not a failure, will not clear on retry); `Reversal` means funds are being returned.
 
-Subject types for `source` / `destination`: `Wallet`, `Card`, `Merchant`, `ExternalCard`, `ExternalWallet`, `SepaBankAccount`, `FasterPaymentBankAccount`, `AchBankAccount`, `SwiftBankAccount`, `SpeiBankAccount`, `CardFeesPayment`.
+Subject types for `source` / `destination`: `Wallet`, `Card`, `Merchant`, `ExternalCard`, `ExternalWallet`, `SepaBankAccount`, `FasterPaymentBankAccount`, `AchBankAccount`, `FedwireBankAccount`, `FedNowBankAccount`, `SwiftBankAccount`, `SpeiBankAccount`, `CardFeesPayment`.
 
 The activity webhook payload matches a feed item. Poll the feed for anything you must not miss.
 
@@ -96,7 +96,7 @@ The activity webhook payload matches a feed item. Poll the feed for anything you
 
 Replace the placeholders with Unix timestamps in seconds. `start` rounds down and `end` rounds up to day boundaries; both positive, `start` strictly before `end`, window **at most 6 months** (`End time must be within 6 months from start time`).
 
-Response: `owner` (wallet address), `chain_id`, `created_at`, `period`, `company_data`, `company_bank_accounts`, `balances[]` (`currency`, `opening`, `closing`, `debit`, `credit`), `transactions[]` (`id`, `type`, `direction`, `amount`, `currency`, `created_at`, `updated_at`, `source`, `destination`, `operations[]` with `account_address`, `token_address`, `token_symbol`, `amount`, `resulting_balance`, `hash`, `created_at`).
+Response: `owner` (wallet address), `chain_id`, `created_at`, `period`, `company_data`, `company_bank_accounts`, `balances[]` (`currency`, `opening`, `closing`, `debit`, `credit`), `transactions[]` (`id`, `type`, `direction`, `amount`, `currency`, `created_at`, `updated_at`, `source`, `destination`, `operations[]` with `account_address`, `token_address`, `token_symbol`, `amount`, `resulting_balance`, `hash`, `created_at`). Exact values come as `*_precise` integer strings (`opening_precise`, `closing_precise`, `debit_precise`, `credit_precise`, `amount_precise`, `resulting_balance_precise`) with a sibling `decimals` that is always `18` here, not the token's decimals: a token whose decimals differ from 18 is rescaled, so its value no longer matches `balance_precise` on `GET /api/v1/wallets`.
 
 Statement timestamps are Unix seconds, not ISO 8601 as in the feed. The statement covers the one chain fixed into the corporation token; log in against each chain for more. JSON only (no PDF/CSV), not paginated, no statement history; consecutive windows must not overlap on the join date.
 
@@ -121,9 +121,9 @@ Every failing call returns one envelope:
 
 Branch on `error_reason`, never parse `error_description`. Validation errors come in two shapes: **structured** (`error_details` key `field` carries the field name, often with `issue` and `pattern`; corporations, bank, recipient and v1 card endpoints) and **keyed** (the field is the `key`, description is `Request failed validation`; employee, role, FX and v2 card endpoints). Handle both.
 
-Note: docs differ. The API reference schema types `error_reason` as an object (`reason`) and `error_category` with an extra `grpc_status_code`; the guides and every example show `error_reason` as a plain string. Read it defensively.
+Note: docs differ. The API reference schema types `error_reason` as an object (`reason`); the guides and every example show `error_reason` as a plain string. Read it defensively. `error_category.grpc_status_code` (informational) is now shown in the guides too.
 
-The rate limiter on `POST /api/v1/token` returns `ErrorTooManyRequests` under `CategoryInternalFailure`, HTTP `500` not `429`; it allows 3 failed attempts per 60 minutes per `client_id` and per client IP, and registered egress IPs bypass the per-client limiter. Branch on `error_reason` and back off.
+The rate limiter on `POST /api/v1/token` returns `ErrorTooManyRequests` under `CategoryInternalFailure`, HTTP `500` not `429`; it applies to repeated failed attempts (successful exchanges are not counted). Branch on `error_reason` and back off.
 
 ## Error Reasons and Categories
 
@@ -171,4 +171,4 @@ Rail field patterns (IBAN, BIC, sort code, routing number, CLABE, PIX, FPS, IMPS
 
 ## Retail vs Corporate Parity
 
-Not implemented in the Corporate API: card top-up; XRPL accounts and withdrawals; `GET /api/v1/cards/{cardId}` (read the list and filter); the activity v2 feed, search and single-item read (only `GET /api/v1/activity/feed` exists). Global deposit addresses work as on retail (Rhino.fi, keyed from `GET /api/v1/config`). Everything else in the corporate tree works, including parts that share retail infrastructure (webhook dispatcher, Rhino.fi).
+Not implemented in the Corporate API: card top-up; XRPL accounts and withdrawals; `GET /api/v1/cards/{cardId}` (use `GET /api/v3/cards/{cardId}`); metal cards; the activity v2 feed, search and single-item read (only `GET /api/v1/activity/feed` exists). Global deposit addresses work as on retail (Rhino.fi, keyed from `GET /api/v1/config`). Everything else in the corporate tree works, including parts that share retail infrastructure (webhook dispatcher, Rhino.fi).

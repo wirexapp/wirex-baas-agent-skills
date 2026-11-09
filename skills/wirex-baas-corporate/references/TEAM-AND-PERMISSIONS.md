@@ -50,7 +50,7 @@ Address field patterns: `line1`/`line2` `^[A-Za-z0-9&.,'’\-/() :+#]{2,100}$`; 
 
 ## Search, Read, Delete
 
-- `GET /api/v1/employees` — `page_number`, `page_size`, `sort`. Needs `EmployeeSu`, `EmployeeManage` or `EmployeeView`.
+- `GET /api/v1/employees` — `page_number` (starts at `0`), `page_size`, `sort`. Needs `EmployeeSu`, `EmployeeManage` or `EmployeeView`.
 - `GET /api/v1/employees/search` — `term` is required unless `manager_address` is given (then 2+ characters matching `^[A-Za-z0-9@._%+' -]{2,100}$`); `page_size` up to 100. Providing neither gives `Search term must contain at least 2 characters`.
 - `GET /api/v1/employees/{employeeId}` — always allowed for your own record; others need `Su`, `EmployeeSu`, `EmployeeManage` or `EmployeeView` (`403` / `Insufficient permission to read this employee`). An id from another corporation returns `401` / `Employee does not belong to corporation` (same as an unknown id).
 - `DELETE /api/v1/employees/{employeeId}` — `401` for another corporation's employee, for the Owner (`Owner cannot be deleted`) and for yourself (`Employee cannot delete itself`). Deleting does not close the employee's cards; close or block them first.
@@ -97,11 +97,11 @@ The code is the key in the token's `permissions` claim.
 |---|---|---|
 | `Su` | 101 | Everything. Cannot be assigned to a custom role |
 | `CardSu` | 102 | Every card operation |
-| `CardCreate` | 103 | Order cards, fee lookups and invoices |
+| `CardCreate` | 103 | Order cards, fee lookups and invoices; read fees, delivery options and the card order configuration |
 | `CardViewDetails` | 104 | PAN, CVV, PIN; list and confirm 3DS requests |
 | `CardManage` | 105 | Activate, block, unblock, close, rename; decide 3DS |
 | `CardLimitManage` | 106 | Change card limits |
-| `CardView` | 107 | List cards |
+| `CardView` | 107 | List and read cards; read fees, delivery options and the card order configuration |
 | `EmployeeSu` | 108 | Every employee and role operation |
 | `EmployeeManage` | 109 | Invite, update, delete employees; change roles |
 | `EmployeeView` | 110 | List and search employees; list roles |
@@ -116,7 +116,7 @@ The code is the key in the token's `permissions` claim.
 
 `TransactionView`, `AccountManage` and `CardView` alone unlock no endpoint beyond what the matrix lists; they express read-only intent.
 
-Suggested role designs from the docs: finance operator `TransactionCreate`; finance manager `TransactionCreate` + `TransactionManage`; card administrator `CardCreate`, `CardManage`, `CardLimitManage`, `CardView`; cardholder `CardView` + `CardViewDetails`; people operations `EmployeeManage` + `EmployeeView`; auditor `CardView`, `TransactionView`, `AccountView`, `EmployeeView`.
+Suggested role designs from the docs: finance operator `TransactionCreate`; finance manager `TransactionCreate` + `TransactionManage`; card administrator `CardCreate`, `CardManage`, `CardLimitManage`, `CardView`; cardholder `CardView` + `CardViewDetails`; people operations `EmployeeManage` + `EmployeeView`; auditor `CardView`, `AccountView`, `EmployeeView` (card reads show only cards linked to the auditor's own employee record); treasury `AccountCreate` (activates bank details and deposit wallets).
 
 ## Evaluation Rules
 
@@ -126,7 +126,7 @@ Suggested role designs from the docs: finance operator `TransactionCreate`; fina
 4. Failure returns `403` / `ErrorPermissionDenied` with `User does not have required permissions`; an empty permission set gives `User does not have any permissions`.
 5. Permissions are resolved at login and frozen into the token.
 
-Endpoints that require `Su` outright and cannot be delegated: `POST /api/v1/corporations/verification-token`, `POST /api/v1/corporations/level-token`, `POST /api/v1/wallets/global`.
+Endpoints that require `Su` outright and cannot be delegated: `POST /api/v1/corporations/verification-token`, `POST /api/v1/corporations/level-token`. `POST /api/v1/wallets/global` was owner-only before October 2026; it now accepts `AccountSu`, `AccountCreate` or `AccountManage`. v3 cards: `GET /api/v3/cards` and `/{cardId}` need `CardSu` or `CardView`; `GET /api/v3/cards/config` needs `CardSu`, `CardCreate` or `CardView`; `POST /api/v3/cards/virtual` and `/plastic` need `CardSu` or `CardCreate`.
 
 ## Endpoint Permission Matrix
 

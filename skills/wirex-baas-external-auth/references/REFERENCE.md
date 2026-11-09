@@ -84,13 +84,20 @@ Mandatory transactions include refunds, chargebacks and network corrections.
 
 `POST {your_webhook_base_url}/v2/webhooks/activities`
 
+The payload is the v2 activity; the same activity is delivered again each time it changes.
+
 | Field | Description |
 |-------|-------------|
 | `type` | `CardTransaction` |
-| `status` | `Completed` or `Failed` |
-| `direction` | `Outbound` (purchase) or `Inbound` (refund) |
-| `source_amount` | `{ amount, currency }` |
-| `user_id`, `card_id`, `id`, `created_at` | Identifiers and timestamp |
+| `user_address` | The cardholder's EOA |
+| `source.card.id` | The card used |
+| `status` | `Pending`, `Completed`, or `Failed`. A purchase refunded or reversed in full reads `Failed` |
+| `operations[].operation_id` | One ledger movement; the `unique_operation_id` of the authorization request |
+| `operations[].operation_reason` | `Authorization`, `Clearing`, `Refund`, `Reversal`, ... |
+| `operations[].transaction_amount` | The movement in the transaction currency; negative debits the user |
+| `id`, `created_at` | Identifier and timestamp |
+
+Book each `Completed` operation once, keyed by `operation_id`.
 
 ## Screening request fields
 

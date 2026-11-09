@@ -15,7 +15,7 @@ Guides: [Recipients](https://docs.wirexapp.com/docs/corporate-recipients), [Crea
 
 ## Model
 
-A recipient is a stored payee: one identity (person or business) plus one or more payment details, one per rail. Recipients belong to the corporation, not to the employee who created them. Corridor and card transfers pay a recipient by id (`recipient_id` plus `recipient_payment_details_id`). Supported details types: `Crypto`, `Sepa`, `Swift`, `FasterPayment`, `Ach`, `Spei`, `Card`, `Pix`, `FpsHk`, `Imps`, `Instapay`, `BiFast`, `Nip`, `Ipp`, `Pse`.
+A recipient is a stored payee: one identity (person or business) plus one or more payment details, one per rail. Recipients belong to the corporation, not to the employee who created them. Corridor and card transfers pay a recipient by id (`recipient_id` plus `recipient_payment_details_id`). Supported details types: `Crypto`, `Sepa`, `Swift`, `FasterPayment`, `Ach`, `Fedwire`, `Spei`, `Card`, `Pix`, `FpsHk`, `Imps`, `Instapay`, `BiFast`, `Nip`, `Ipp`, `Pse`.
 
 Reads need no permission. Writes need `TransactionSu` or `TransactionManage`.
 
@@ -60,6 +60,7 @@ Response: `id` (the `recipient_id`), `personal_info` (`first_name`, `last_name`,
 | `Swift` | `swift` | `iban`, `bic`, `bank_name`, `bank_country`, `legal_address` |
 | `FasterPayment` | `faster_payments` | `account_number`, `sort_code` |
 | `Ach` | `ach` | `routing_number`, `account_number`, `legal_address`; optional `bank_name` |
+| `Fedwire` | `fedwire` | `routing_number`, `account_number`, `bank_name`, `legal_address` |
 | `Spei` | `spei` | `clabe`, `recipient_id_number`, `legal_address` |
 | `Card` | `card` | `card_id`, `card_pan_last` |
 | `Pix` | `pix` | `pix_key`, `pix_key_type`, `recipient_name`, `recipient_id_number`, `legal_address` |
@@ -74,6 +75,8 @@ Response: `id` (the `recipient_id`), `personal_info` (`first_name`, `last_name`,
 > Note: docs differ. The recipients-create guide lists `bank_name`, `bank_country`, `legal_address` (Swift/Ach/FpsHk) and `recipient_id_number`, `legal_address` (Spei/Pix) as optional; the request schemas in the API reference mark them required, so send them. `legal_address` requires `line1`, `city`, `country`, `zip_code`.
 
 The `FasterPayment` object is `faster_payments` on the way in and `faster_payment` on the way out. `card.card_id` is the tokenized card identifier that push-to-card takes as `external_card_id`.
+
+`Fedwire` and `Ach` are separate details types and each corridor pays only its own type: an `Ach`-only recipient cannot be paid over `fedwire` (rejected at `initiate` with `Invalid recipient details`); add `Fedwire` details with `POST /api/v1/recipients/{recipientId}/payment_details`. `legal_address.line2` is not sent with a Fedwire payout. `first_name` / `last_name` must match `^[a-zA-Z][a-zA-Z\-' ]{0,49}$` (unaccented Latin; `José` is rejected). Send `legal_address.state` for a US address: without it the `ach` payout is refused after the debit and the debit is returned. `POST /api/v2/recipients` accepts an optional `transaction_authorization`, checked only for an agent company in `Signature` mode.
 
 ## Field Formats
 
@@ -106,7 +109,7 @@ Note: the PSE `document_type` regex accepts `PP`, while the field's own document
 
 | Call | Notes |
 |---|---|
-| `GET /api/v1/recipients` | `page_number`, `page_size` (default 25), `sort` (`name` or `usage`); response `data[]` |
+| `GET /api/v1/recipients` | `page_number` (starts at `0`; `0` also returns the first page on bank accounts only), `page_size` (default 25), `sort` (`name` or `usage`); response `data[]` |
 | `GET /api/v1/recipients/{recipientId}` | One recipient |
 | `GET /api/v1/recipients/filter/name` | Required `name` substring |
 | `GET /api/v1/recipients/filter/catalog` | Required `catalog_index`, a single letter `^[a-zA-Z]$` (first letter of the full name) |

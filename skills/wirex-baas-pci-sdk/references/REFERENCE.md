@@ -1,6 +1,6 @@
 # Wirex BaaS PCI SDK Reference
 
-Sources: https://docs.wirexapp.com/docs/retail-pci-sdk and the `retail-pci-sdk-*` pages.
+Sources: https://docs.wirexapp.com/docs/retail-pci-sdk and the `retail-pci-sdk-*` pages. Everything below is the **Web SDK** (`retail-pci-sdk-web-*`); the mobile SDKs are summarized in SKILL.md and documented on the per-platform `retail-pci-sdk-react-native-*`, `-flutter-*`, `-ios-*` and `-android-*` pages.
 
 ## Tokenize results
 
@@ -21,7 +21,7 @@ Payout (`tokenizeOctDestination`):
 
 ```json
 {
-  "externalCardId": "tok_a1b2c3d4e5f6789012345678",
+  "externalCardId": "63c4dd27-1f95-42b1-9a09-35cdda05f4c6",
   "brand": "Visa",
   "bin": "424242",
   "last4": "4242"
@@ -68,7 +68,7 @@ Reveal: `cardholderLabel` (Cardholder), `cardNumberLabel` (Card Number), `expiry
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `cardId` | string | Yes | Issued card to reveal |
-| `actionToken` | string | Yes | Single-use, consumed on fetch |
+| `actionToken` | string | Yes | Step-up token from confirmation, valid for 5 minutes |
 | `fetchDetails` | boolean | Yes | Requests `number` and `expiry`; ignored when `fields` set |
 | `fetchCvv` | boolean | Yes | Requests `cvv`; ignored when `fields` set |
 | `fields` | array | No | Rows in order: `cardholder`, `number`, `expiry`, `cvv`, `pin`; drives which endpoints are called |

@@ -45,7 +45,7 @@ Use it when you keep your own balance ledger, need real-time per-transaction aut
 5. Fund the Master Account, then implement the endpoints below.
 
 Master Account requirements:
-- Minimum balance for the external auth model: $50,000 or EUR 50,000, as applicable.
+- Minimum balance for the external authorization model: $50,000 or EUR 50,000, or both, as applicable. Declines due to insufficient funds are monitored by card schemes.
 - Recommended: 3-5 days of typical transaction volume; monitor and top up proactively.
 - Mandatory transactions process even if the balance is insufficient (the Master Account may go negative).
 - Non-mandatory transactions are declined when the Master Account balance is insufficient, even if you approve.
@@ -193,23 +193,32 @@ Code examples (JavaScript, Python, Go) are in the Authorization API docs page.
 - Issuance works as in the standard flow with the same cards: **v1 (external fee)** you pay the invoice and pass `payment_transaction_hash`; **v2 (direct fee)** Wirex debits the fee automatically, from your **Master Account** (cardholders have no on-chain balance). v3 issuance is not available under External Authorization (see `wirex-baas-cards`).
 - Block, unblock, close and set limits work identically to standard integration.
 - Settlement source is the Master Account; balance check is your authorization API; balance updates happen in your system.
-- After completion Wirex sends `POST {your_webhook_base_url}/v2/webhooks/activities`; use it to update your ledger:
+- After completion Wirex sends `POST {your_webhook_base_url}/v2/webhooks/activities`; use it to update your ledger. The payload is the v2 activity (see Activity History) and the same activity is delivered again each time it changes:
 
 ```json
 {
   "id": "a7b2a4b3-2f61-41a7-9f5a-3f3f0b1a3d22",
+  "user_address": "0xA7E41d5680dE394EaA2ed417169DFf56840Fb3EE",
+  "chain_id": 8453,
   "type": "CardTransaction",
-  "status": "Completed",
+  "sub_type": "Pos",
   "direction": "Outbound",
-  "source_amount": { "amount": 123.45, "currency": "USD" },
-  "user_id": "5f7e3f7b-8e0c-48b8-9f2c-3e0c9d7a2a11",
-  "card_id": "c0b2c7b1-1d2e-4d7a-9a5d-2b7e3c4d5f66",
+  "status": "Completed",
+  "source": { "type": "Cards", "card": { "id": "64120850-73a1-4df5-a074-d463258c9deb", "pan_last": "4821", "payment_system": "Visa" } },
+  "operations": [
+    {
+      "operation_id": "3b0c5f7e-2a1d-4e8f-9c6b-7d5e4f3a2b1c",
+      "operation_reason": "Authorization",
+      "transaction_amount": { "amount": -123.45, "amount_precise": "-123450000000000000000", "decimals": 18, "currency": "USD" },
+      "status": "Completed"
+    }
+  ],
   "created_at": "2024-01-01T10:00:00Z"
 }
 ```
 
-Handle only `type == CardTransaction` with `status == Completed`: `Outbound` (purchase) debits the user balance, `Inbound` (refund) credits it. Refunds are mandatory Credit transactions: the Master Account is credited and you receive the webhook. Transaction history: standard Activity History endpoints (see `wirex-baas-webhooks`); transactions are attributed to users by EOA identifier.
-- Reconciliation: you hold the truth for user balances; Wirex tracks only the Master Account. Match approved authorizations to webhooks; the Master Account balance should equal the sum of processed transactions. Discrepancies: mandatory transactions processed without your approval, network timeouts where the transaction succeeded, chargebacks or reversals. Always key on `unique_operation_id`.
+Handle only `type == CardTransaction`. Book each `Completed` operation once, keyed by `operations[].operation_id` (the `unique_operation_id` of the authorization request); a refund or reversal arrives as a new operation on the activity you already processed. `operations[].transaction_amount` is negative when it debits the user and positive when it credits them. `status` is `Pending`, `Completed` or `Failed`; a purchase refunded or reversed in full reads `Failed`. Refunds are mandatory Credit transactions: the Master Account is credited and you receive the webhook. Transaction history: standard Activity History endpoints (see `wirex-baas-webhooks`); transactions are attributed to users by EOA identifier (`user_address`).
+- Reconciliation: you hold the truth for user balances; Wirex tracks only the Master Account. Match approved authorizations to webhooks; the Master Account balance should equal the sum of processed transactions. Discrepancies: mandatory transactions processed without your approval, network timeouts where the transaction succeeded, chargebacks or reversals. Key on `unique_operation_id` for authorization handling and on `operations[].operation_id` for booking settled movements from the activity webhook.
 
 ## Transaction screening (mandatory)
 

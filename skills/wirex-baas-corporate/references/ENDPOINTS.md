@@ -23,8 +23,8 @@ Every Corporate API endpoint with method, path, purpose, required permission and
 - Base URL: `https://api-business.wirexapp.tech` (sandbox) or `https://api-business.wirexapp.com` (production). The retail hosts `api-baas.wirexapp.*` do not route corporate endpoints.
 - Auth column: **anon** = no `Authorization` header; **partner** = partner token + identity headers; **corp** = corporation token (`Authorization: Bearer <corporation_token>`).
 - Permission column: the endpoint admits a caller holding **any one** of the listed permissions. `Su` always passes. `none` = any valid corporation token.
-- List endpoints take `page_number` (1-indexed), `page_size` (default 25, maximum 50) and `sort` (`name` default, or `usage`). `GET /api/v1/employees/search` allows `page_size` up to 100.
-- `precise_amount` is a string with the integer amount in the token's smallest unit; `amount` is a decimal number.
+- List endpoints take `page_number` (starts at `0`; `page_number=1` is the second page, so paging from `1` skips the first page; exception: `GET /api/v1/bank/accounts` pages from `1` and `0` also returns the first page), `page_size` (default 25, maximum 50) and `sort` (`name` default, or `usage`). `GET /api/v1/employees/search` allows `page_size` up to 100.
+- `precise_amount` is a string with the integer amount in the token's smallest unit; `amount` is a decimal number. Other responses use a `_precise` suffix with a `decimals` field beside it (`amount_precise`, `balance_precise`, `order_fee_precise`, `source_asset_amount_precise`, `opening_precise`): the float is rounded for display, often to 2 decimals, so compute and reconcile on the `_precise` value and read its `decimals` every time (token amounts scale by the token's decimals, fiat amounts and every statement amount by `18`).
 - Full permission names and codes: [TEAM-AND-PERMISSIONS.md](TEAM-AND-PERMISSIONS.md).
 
 ## Authorization and Configuration
@@ -71,20 +71,23 @@ Every Corporate API endpoint with method, path, purpose, required permission and
 | Method | Path | Permission | Purpose | Key fields |
 |---|---|---|---|---|
 | GET | `/api/v1/wallets` | none | Wallets with balances | `data[]`: `wallet_address`, `wallet_status` (`Unknown`/`Confirmed`/`Rejected`), `wallet_type` (`Primary`/`Secondary`/`Global`), `balances[]` |
-| POST | `/api/v1/wallets/global` | `Su` only | Register an extra address to receive cross-chain deposits | `wallet_address`, `wallet_name` |
-| POST | `/api/v1/fx/estimate` | `TransactionSu`; `StableExchange` capability `Active` | Quote a swap, get a deposit address | `source_asset_address`, `destination_asset_address`, exactly one of `source_asset_amount` / `destination_asset_amount` (decimal strings), optional `correlation_id`; response `estimation_id`, `deposit_address`, `trade_rate`, `expiration_time` |
+| POST | `/api/v1/wallets/global` | `AccountSu`, `AccountCreate`, `AccountManage` | Register an extra address to receive cross-chain deposits | `wallet_address`, `wallet_name` |
+| POST | `/api/v1/fx/estimate` | `TransactionSu`; `StableExchange` capability `Active` | Quote a swap, get a deposit address | `source_asset_address`, `destination_asset_address`, exactly one of `source_asset_amount` / `destination_asset_amount` (decimal strings), optional `correlation_id`; response `estimation_id`, `deposit_address`, `trade_rate`, `expiration_time`, plus `source_asset_amount_precise` / `source_asset_decimals` (the exact amount to deposit) |
 | POST | `/api/v1/fx` | same | Execute after paying the deposit address on-chain | `estimation_id`, `payment_transaction_hash`; response `trade_id` |
 
 ## Cards
 
 | Method | Path | Permission | Purpose | Key fields |
 |---|---|---|---|---|
-| GET | `/api/v1/cards` | `CardSu`, `CardView` | List cards (no get-by-id endpoint) | query `employee_id` (admins only), pagination; `data[]` with `status`, `card_data`, `limit`, `allowed_actions` |
+| GET | `/api/v1/cards` | `CardSu`, `CardView` | List cards (get by id: `GET /api/v3/cards/{cardId}`) | query `employee_id` (admins only), pagination; `data[]` with `status`, `card_data`, `limit`, `allowed_actions` |
 | GET | `/api/v1/cards/{type}/fees/{country}` | `CardSu`, `CardCreate`, `CardView` | Order fee; `type` = `Plastic`, `Virtual`, `Metal` | `order_fee`, `estimated_payment_amounts[]` |
 | GET | `/api/v1/cards/delivery/countries` | same | Plastic delivery countries | array of ISO codes |
 | GET | `/api/v1/cards/delivery/methods/{country}` | same | Couriers and delivery fee | `provider`, `fee` |
 | POST | `/api/v1/cards/{type}/fees/{country}/payment` | `CardSu`, `CardCreate` | v1 fee invoice | body `token_address`, `delivery_provider` (non-Virtual); response `recipient_address`, `payment_amount` |
 | POST | `/api/v2/cards/{type}/fees/{country}/payment` | same | v2 fee invoice | adds `delivery_id` (integer, single-use) |
+| GET | `/api/v3/cards`, `/api/v3/cards/{cardId}` | `CardSu`, `CardView` | List / read cards across every chain | same card objects as v1 |
+| GET | `/api/v3/cards/config` | `CardSu`, `CardCreate`, `CardView` | Orderable formats, payment systems, designs, card programs, countries | `formats[].offerings[]` |
+| POST | `/api/v3/cards/virtual`, `/api/v3/cards/plastic` | `CardSu`, `CardCreate` | Issue with optional `design`, `card_program`, `payment_system` (v2 fee invoice; `delivery_id` only when the order is priced above zero) | as v2 |
 | POST | `/api/v1/cards/virtual` | `CardSu`, `CardCreate` | Issue virtual card (v1 fee flow) | `card_name`, `name_on_card`, `employee_id`, `payment_transaction_hash`; response `id` |
 | POST | `/api/v1/cards/plastic` | same | Issue plastic card (v1) | adds `delivery_address` (required) and `delivery_provider` (required when fees are enforced) |
 | POST | `/api/v2/cards/virtual` | same | Issue virtual card (v2 fee flow) | `delivery_id` instead of `payment_transaction_hash` |
@@ -113,20 +116,20 @@ Every Corporate API endpoint with method, path, purpose, required permission and
 
 | Method | Path | Permission | Purpose | Key fields |
 |---|---|---|---|---|
-| POST | `/api/v1/cards/transfer/estimate` | `CardSu`; `CardTransfer` capability `Active` | Quote an OCT push | `external_card_id`, `amount` (> 0), `tokens[]`, optional `currency` (defaults `USD`); response `estimation_id`, `expires_at`, `estimated_amounts[]` |
+| POST | `/api/v1/cards/transfer/estimate` | `CardSu`; `CardTransfer` capability `Active` | Quote an OCT push | `external_card_id`, `amount` (> 0), `tokens[]`, optional `currency` (defaults `EUR`); response `estimation_id`, `expires_at`, `estimated_amounts[]` |
 | POST | `/api/v1/cards/transfer` | same | Execute | `estimation_id`, `token_address`; response `id` (activity feed id) |
 
 ## Bank Accounts and Transfers
 
 | Method | Path | Permission | Purpose | Key fields |
 |---|---|---|---|---|
-| GET | `/api/v1/bank/accounts` | `TransactionSu`, `TransactionCreate`, `AccountView` | Bank accounts and details | `id` is composite `<accountId>:<detailsId>`; `details.iban`/`bic`/`account_number`/`sort_code`/`routing_number`/`clabe`/`mandatory_reference` |
+| GET | `/api/v1/bank/accounts` | `TransactionSu`, `TransactionCreate`, `AccountView` | Bank accounts and details | `id` is composite `<accountId>:<detailsId>`; `details.iban`/`bic`/`account_number`/`sort_code`/`routing_number`/`clabe`/`mandatory_reference`; `account_type` includes `Fedwire`; v1 transfer takes the whole `id`, v3 takes only `<accountId>` |
 | POST | `/api/v1/bank/accounts` | `TransactionSu`, `AccountSu`, `AccountCreate` | Activate account details | body `account_type`; response `details_id` |
 | POST | `/api/v1/bank/transfer/estimate` | `TransactionSu`, `TransactionCreate` | v1 estimate (no beneficiary) | `account_id` (composite), `amount`, `tokens[]`; response `id`, `expires_at`, `estimated_amounts[]` |
-| POST | `/api/v2/bank/transfer/estimate` | same | v2 estimate; `recipient` and `recipient_account` required for ACH | as v1 plus `reference` and beneficiary |
-| POST | `/api/v1/bank/transfer` | same | Execute SEPA/ACH/Faster Payments transfer | `account_id`, `token_address`, `recipient`, `recipient_account`, one of `estimation_id` / `amount`, `reference`; response `id` |
-| POST | `/api/v3/bank/estimate/{corridor}` | same | Corridor estimate | `recipient_id`, `recipient_payment_details_id`, `destination_amount`, `destination_currency`, `account_id` (plain UUID, bank corridors), `source_tokens[]` |
-| POST | `/api/v3/bank/initiate/{corridor}` | same | Corridor initiate | `estimation_id`, `source_token_address`, `reference`; response `transfer_id`, `status`, `required_actions[]` |
+| POST | `/api/v2/bank/transfer/estimate` | same | v2 estimate; `recipient` and `recipient_account` required on every rail | as v1 plus beneficiary (`reference` is ignored by the estimate) |
+| POST | `/api/v1/bank/transfer` | same | Execute SEPA/ACH/Faster Payments transfer | `account_id`, `token_address`, `recipient`, `recipient_account`, `estimation_id` (an `amount`-only request is refused with `ErrorNotFound`), `reference`, `transaction_authorization` (`Signature` mode); response `id` |
+| POST | `/api/v3/bank/estimate/{corridor}` | same | Corridor estimate | `recipient_id`, `recipient_payment_details_id`, `destination_amount`, `destination_currency`, `account_id` (plain UUID, bank corridors `sepa`, `ach`, `faster-payments`, `fedwire`), `source_tokens[]` |
+| POST | `/api/v3/bank/initiate/{corridor}` | same | Corridor initiate | `estimation_id`, `source_token_address`, `reference`, `transaction_authorization` (`Signature` mode); response `transfer_id`, `status`, `required_actions[]` (omitted when none) |
 | POST | `/api/v3/bank/confirm/{corridor}` | same | Confirm a `FundTransfer` (CPN corridors) | `transfer_id`, `actions[]` with `data.tx_hash`; response `status`, `tx_hash` |
 | POST | `/api/v1/bulk/transfer` | same | Approve a crypto batch (1-50), reserves balance | `recipients[]`; response `transaction_id`, `operation_id`, `crypto_transfers[]` |
 
